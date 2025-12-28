@@ -1,12 +1,10 @@
 import '../models.dart';
 
 class ParserService {
-  /// 解析AI消息
   ParseResult parse(String message) {
     final instructions = <Instruction>[];
     final errors = <String>[];
     
-    // 按文件分割
     final filePattern = RegExp(r'\[FILE\]\s*(.+?)(?=\n|\[)', caseSensitive: false);
     final fileMatches = filePattern.allMatches(message).toList();
     
@@ -49,9 +47,9 @@ class ParserService {
       return instructions;
     }
     
-    // [CREATE] - 简化版，支持有或没有代码块标记
+    // [CREATE] ... [/CREATE]
     final createPattern = RegExp(
-      r'\[CREATE\]\s*(?:```\w*\n?)?([\s\S]*?)(?:```\s*)?\[/CREATE\]',
+      r'\[CREATE\]\s*\n?([\s\S]*?)\[/CREATE\]',
       caseSensitive: false,
     );
     final createMatch = createPattern.firstMatch(content);
@@ -64,9 +62,9 @@ class ParserService {
       return instructions;
     }
     
-    // [REPLACE] - 简化版
+    // [REPLACE] ... [/REPLACE]
     final replacePattern = RegExp(
-      r'\[REPLACE\]\s*(?:```\w*\n?)?([\s\S]*?)(?:```\s*)?\[/REPLACE\]',
+      r'\[REPLACE\]\s*\n?([\s\S]*?)\[/REPLACE\]',
       caseSensitive: false,
     );
     final replaceMatch = replacePattern.firstMatch(content);
@@ -79,116 +77,72 @@ class ParserService {
       return instructions;
     }
     
-    // [FIND]...[/FIND] + [REPLACE_WITH]...[/REPLACE_WITH]
-    final findPattern = RegExp(
-      r'\[FIND(?::(\w+))?\]\s*\n?([\s\S]*?)\[/FIND\]',
+    // [MODIFY] 双锚点替换
+    final modifyPattern = RegExp(
+      r'\[MODIFY\]\s*\[ANCHOR_START\]\s*\n?([\s\S]*?)\[/ANCHOR_START\]\s*\[ANCHOR_END\]\s*\n?([\s\S]*?)\[/ANCHOR_END\]\s*\[CONTENT\]\s*\n?([\s\S]*?)\[/CONTENT\]',
       caseSensitive: false,
     );
-    final replaceWithPattern = RegExp(
-      r'\[REPLACE_WITH\]\s*\n?([\s\S]*?)\[/REPLACE_WITH\]',
-      caseSensitive: false,
-    );
-    
-    final findMatches = findPattern.allMatches(content).toList();
-    final replaceWithMatches = replaceWithPattern.allMatches(content).toList();
-    
-    for (var i = 0; i < findMatches.length && i < replaceWithMatches.length; i++) {
-      final mode = _parseAnchorMode(findMatches[i].group(1));
+    final modifyMatch = modifyPattern.firstMatch(content);
+    if (modifyMatch != null) {
       instructions.add(Instruction(
         filePath: filePath,
         type: OperationType.findReplace,
-        anchor: findMatches[i].group(2)!.trim(),
-        replaceWith: replaceWithMatches[i].group(1)!.trim(),
-        anchorMode: mode,
-        isRegex: mode == AnchorMode.regex,
+        anchor: modifyMatch.group(1)!.trim(),
+        anchorEnd: modifyMatch.group(2)!.trim(),
+        replaceWith: modifyMatch.group(3)!.trim(),
       ));
+      return instructions;
     }
     
-    // [INSERT_AFTER] / [INSERT_BEFORE]
-    _parseInsertOperations(filePath, content, instructions);
-    
-    // [DELETE]
-    _parseDeleteOperations(filePath, content, instructions);
-    
-    return instructions;
-  }
-  
-  void _parseInsertOperations(String filePath, String content, List<Instruction> instructions) {
-    final insertAfterPattern = RegExp(r'\[INSERT_AFTER(?::(\w+))?\]', caseSensitive: false);
-    final insertBeforePattern = RegExp(r'\[INSERT_BEFORE(?::(\w+))?\]', caseSensitive: false);
-    final anchorPattern = RegExp(r'\[ANCHOR\]\s*\n?([\s\S]*?)\[/ANCHOR\]', caseSensitive: false);
-    final contentPattern = RegExp(r'\[CONTENT\]\s*\n?([\s\S]*?)\[/CONTENT\]', caseSensitive: false);
-    
-    // INSERT_AFTER
-    final afterMatch = insertAfterPattern.firstMatch(content);
-    if (afterMatch != null) {
-      final remaining = content.substring(afterMatch.end);
-      final anchor = anchorPattern.firstMatch(remaining)?.group(1)?.trim();
-      final insertContent = contentPattern.firstMatch(remaining)?.group(1);
-      
-      if (anchor != null && insertContent != null) {
-        final mode = _parseAnchorMode(afterMatch.group(1));
-        instructions.add(Instruction(
-          filePath: filePath,
-          type: OperationType.insertAfter,
-          anchor: anchor,
-          content: insertContent,
-          anchorMode: mode,
-          isRegex: mode == AnchorMode.regex,
-        ));
-      }
-    }
-    
-    // INSERT_BEFORE
-    final beforeMatch = insertBeforePattern.firstMatch(content);
-    if (beforeMatch != null) {
-      final remaining = content.substring(beforeMatch.end);
-      final anchor = anchorPattern.firstMatch(remaining)?.group(1)?.trim();
-      final insertContent = contentPattern.firstMatch(remaining)?.group(1);
-      
-      if (anchor != null && insertContent != null) {
-        final mode = _parseAnchorMode(beforeMatch.group(1));
-        instructions.add(Instruction(
-          filePath: filePath,
-          type: OperationType.insertBefore,
-          anchor: anchor,
-          content: insertContent,
-          anchorMode: mode,
-          isRegex: mode == AnchorMode.regex,
-        ));
-      }
-    }
-  }
-  
-  void _parseDeleteOperations(String filePath, String content, List<Instruction> instructions) {
-    final deletePattern = RegExp(r'\[DELETE(?::(\w+))?\]', caseSensitive: false);
-    final anchorPattern = RegExp(r'\[ANCHOR\]\s*\n?([\s\S]*?)\[/ANCHOR\]', caseSensitive: false);
-    
+    // [DELETE] 双锚点删除
+    final deletePattern = RegExp(
+      r'\[DELETE\]\s*\[ANCHOR_START\]\s*\n?([\s\S]*?)\[/ANCHOR_START\]\s*\[ANCHOR_END\]\s*\n?([\s\S]*?)\[/ANCHOR_END\]',
+      caseSensitive: false,
+    );
     final deleteMatch = deletePattern.firstMatch(content);
     if (deleteMatch != null) {
-      final remaining = content.substring(deleteMatch.end);
-      final anchor = anchorPattern.firstMatch(remaining)?.group(1)?.trim();
-      
-      if (anchor != null) {
-        final mode = _parseAnchorMode(deleteMatch.group(1));
-        instructions.add(Instruction(
-          filePath: filePath,
-          type: OperationType.deleteContent,
-          anchor: anchor,
-          anchorMode: mode,
-          isRegex: mode == AnchorMode.regex,
-        ));
-      }
+      instructions.add(Instruction(
+        filePath: filePath,
+        type: OperationType.deleteContent,
+        anchor: deleteMatch.group(1)!.trim(),
+        anchorEnd: deleteMatch.group(2)!.trim(),
+      ));
+      return instructions;
     }
-  }
-  
-  AnchorMode _parseAnchorMode(String? modeStr) {
-    switch (modeStr?.toUpperCase()) {
-      case 'REGEX': return AnchorMode.regex;
-      case 'IGNORE_SPACE':
-      case 'NOSPACE': return AnchorMode.ignoreSpace;
-      default: return AnchorMode.exact;
+    
+    // [INSERT_AFTER]
+    final insertAfterPattern = RegExp(
+      r'\[INSERT_AFTER\]\s*\[ANCHOR\]\s*\n?([\s\S]*?)\[/ANCHOR\]\s*\[CONTENT\]\s*\n?([\s\S]*?)\[/CONTENT\]',
+      caseSensitive: false,
+    );
+    final insertAfterMatch = insertAfterPattern.firstMatch(content);
+    if (insertAfterMatch != null) {
+      instructions.add(Instruction(
+        filePath: filePath,
+        type: OperationType.insertAfter,
+        anchor: insertAfterMatch.group(1)!.trim(),
+        content: insertAfterMatch.group(2),
+      ));
+      return instructions;
     }
+    
+    // [INSERT_BEFORE]
+    final insertBeforePattern = RegExp(
+      r'\[INSERT_BEFORE\]\s*\[ANCHOR\]\s*\n?([\s\S]*?)\[/ANCHOR\]\s*\[CONTENT\]\s*\n?([\s\S]*?)\[/CONTENT\]',
+      caseSensitive: false,
+    );
+    final insertBeforeMatch = insertBeforePattern.firstMatch(content);
+    if (insertBeforeMatch != null) {
+      instructions.add(Instruction(
+        filePath: filePath,
+        type: OperationType.insertBefore,
+        anchor: insertBeforeMatch.group(1)!.trim(),
+        content: insertBeforeMatch.group(2),
+      ));
+      return instructions;
+    }
+    
+    return instructions;
   }
 }
 
@@ -199,9 +153,7 @@ class ParseResult {
   ParseResult({required this.instructions, required this.errors});
 }
 
-/// 代码合并器
 class CodeMerger {
-  /// 执行指令
   MergeResult execute(Instruction instruction, String? currentContent) {
     switch (instruction.type) {
       case OperationType.create:
@@ -215,7 +167,7 @@ class CodeMerger {
         return MergeResult(success: true, content: '');
         
       case OperationType.findReplace:
-        return _executeFindReplace(instruction, currentContent);
+        return _executeModify(instruction, currentContent);
         
       case OperationType.insertBefore:
         return _executeInsertBefore(instruction, currentContent);
@@ -224,27 +176,62 @@ class CodeMerger {
         return _executeInsertAfter(instruction, currentContent);
         
       case OperationType.deleteContent:
-        return _executeDeleteContent(instruction, currentContent);
+        return _executeDelete(instruction, currentContent);
     }
   }
   
-  MergeResult _executeFindReplace(Instruction instruction, String? content) {
+  // 双锚点替换
+  MergeResult _executeModify(Instruction instruction, String? content) {
     if (content == null) {
       return MergeResult(success: false, error: '文件内容为空');
     }
     
-    final anchor = instruction.anchor!;
-    final replaceWith = instruction.replaceWith ?? '';
+    final anchorStart = instruction.anchor!;
+    final anchorEnd = instruction.anchorEnd!;
+    final replacement = instruction.replaceWith ?? '';
     
-    final location = _locate(content, anchor, instruction.anchorMode, instruction.isRegex);
-    
-    if (location == null) {
-      return MergeResult(success: false, error: '未找到锚点');
+    final startIndex = content.indexOf(anchorStart);
+    if (startIndex == -1) {
+      return MergeResult(success: false, error: '未找到开始锚点');
     }
     
-    final newContent = content.substring(0, location.start) +
-        replaceWith +
-        content.substring(location.end);
+    final endIndex = content.indexOf(anchorEnd, startIndex);
+    if (endIndex == -1) {
+      return MergeResult(success: false, error: '未找到结束锚点');
+    }
+    
+    final actualEnd = endIndex + anchorEnd.length;
+    
+    final newContent = content.substring(0, startIndex) +
+        replacement +
+        content.substring(actualEnd);
+    
+    return MergeResult(success: true, content: newContent);
+  }
+  
+  // 双锚点删除
+  MergeResult _executeDelete(Instruction instruction, String? content) {
+    if (content == null) {
+      return MergeResult(success: false, error: '文件内容为空');
+    }
+    
+    final anchorStart = instruction.anchor!;
+    final anchorEnd = instruction.anchorEnd!;
+    
+    final startIndex = content.indexOf(anchorStart);
+    if (startIndex == -1) {
+      return MergeResult(success: false, error: '未找到开始锚点');
+    }
+    
+    final endIndex = content.indexOf(anchorEnd, startIndex);
+    if (endIndex == -1) {
+      return MergeResult(success: false, error: '未找到结束锚点');
+    }
+    
+    final actualEnd = endIndex + anchorEnd.length;
+    
+    final newContent = content.substring(0, startIndex) +
+        content.substring(actualEnd);
     
     return MergeResult(success: true, content: newContent);
   }
@@ -257,15 +244,14 @@ class CodeMerger {
     final anchor = instruction.anchor!;
     final insertContent = instruction.content ?? '';
     
-    final location = _locate(content, anchor, instruction.anchorMode, instruction.isRegex);
-    
-    if (location == null) {
+    final index = content.indexOf(anchor);
+    if (index == -1) {
       return MergeResult(success: false, error: '未找到锚点');
     }
     
-    final newContent = content.substring(0, location.start) +
+    final newContent = content.substring(0, index) +
         insertContent +
-        content.substring(location.start);
+        content.substring(index);
     
     return MergeResult(success: true, content: newContent);
   }
@@ -278,77 +264,19 @@ class CodeMerger {
     final anchor = instruction.anchor!;
     final insertContent = instruction.content ?? '';
     
-    final location = _locate(content, anchor, instruction.anchorMode, instruction.isRegex);
-    
-    if (location == null) {
+    final index = content.indexOf(anchor);
+    if (index == -1) {
       return MergeResult(success: false, error: '未找到锚点');
     }
     
-    final newContent = content.substring(0, location.end) +
+    final insertPosition = index + anchor.length;
+    
+    final newContent = content.substring(0, insertPosition) +
         insertContent +
-        content.substring(location.end);
+        content.substring(insertPosition);
     
     return MergeResult(success: true, content: newContent);
   }
-  
-  MergeResult _executeDeleteContent(Instruction instruction, String? content) {
-    if (content == null) {
-      return MergeResult(success: false, error: '文件内容为空');
-    }
-    
-    final anchor = instruction.anchor!;
-    
-    final location = _locate(content, anchor, instruction.anchorMode, instruction.isRegex);
-    
-    if (location == null) {
-      return MergeResult(success: false, error: '未找到要删除的内容');
-    }
-    
-    final newContent = content.substring(0, location.start) +
-        content.substring(location.end);
-    
-    return MergeResult(success: true, content: newContent);
-  }
-  
-  _Location? _locate(String content, String anchor, AnchorMode mode, bool isRegex) {
-    if (isRegex || mode == AnchorMode.regex) {
-      return _locateByRegex(content, anchor);
-    } else if (mode == AnchorMode.ignoreSpace) {
-      return _locateIgnoreSpace(content, anchor);
-    } else {
-      return _locateExact(content, anchor);
-    }
-  }
-  
-  _Location? _locateExact(String content, String anchor) {
-    final trimmed = anchor.trim();
-    final index = content.indexOf(trimmed);
-    if (index == -1) return null;
-    return _Location(index, index + trimmed.length);
-  }
-  
-  _Location? _locateIgnoreSpace(String content, String anchor) {
-    final parts = anchor.trim().split(RegExp(r'\s+'));
-    final pattern = parts.map((p) => RegExp.escape(p)).join(r'\s*');
-    return _locateByRegex(content, pattern);
-  }
-  
-  _Location? _locateByRegex(String content, String pattern) {
-    try {
-      final regex = RegExp(pattern, multiLine: true, dotAll: true);
-      final match = regex.firstMatch(content);
-      if (match == null) return null;
-      return _Location(match.start, match.end);
-    } catch (e) {
-      return null;
-    }
-  }
-}
-
-class _Location {
-  final int start;
-  final int end;
-  _Location(this.start, this.end);
 }
 
 class MergeResult {
@@ -359,53 +287,51 @@ class MergeResult {
   MergeResult({required this.success, this.content, this.error});
 }
 
-/// Diff生成器
 class DiffGenerator {
   List<DiffLine> generate(String? original, String? modified) {
     final oldLines = original?.split('\n') ?? [];
     final newLines = modified?.split('\n') ?? [];
     
     final result = <DiffLine>[];
+    final lcs = _lcs(oldLines, newLines);
     
-    final lcs = _longestCommonSubsequence(oldLines, newLines);
-    
-    var oldIndex = 0;
-    var newIndex = 0;
-    var lcsIndex = 0;
+    var oldIdx = 0;
+    var newIdx = 0;
+    var lcsIdx = 0;
     var newLineNum = 1;
     
-    while (oldIndex < oldLines.length || newIndex < newLines.length) {
-      if (lcsIndex < lcs.length &&
-          oldIndex < oldLines.length &&
-          newIndex < newLines.length &&
-          oldLines[oldIndex] == lcs[lcsIndex] &&
-          newLines[newIndex] == lcs[lcsIndex]) {
+    while (oldIdx < oldLines.length || newIdx < newLines.length) {
+      if (lcsIdx < lcs.length &&
+          oldIdx < oldLines.length &&
+          newIdx < newLines.length &&
+          oldLines[oldIdx] == lcs[lcsIdx] &&
+          newLines[newIdx] == lcs[lcsIdx]) {
         result.add(DiffLine(
-          oldLineNumber: oldIndex + 1,
+          oldLineNumber: oldIdx + 1,
           newLineNumber: newLineNum,
-          content: oldLines[oldIndex],
+          content: oldLines[oldIdx],
           type: DiffLineType.unchanged,
         ));
-        oldIndex++;
-        newIndex++;
-        lcsIndex++;
+        oldIdx++;
+        newIdx++;
+        lcsIdx++;
         newLineNum++;
-      } else if (oldIndex < oldLines.length &&
-          (lcsIndex >= lcs.length || oldLines[oldIndex] != lcs[lcsIndex])) {
+      } else if (oldIdx < oldLines.length &&
+          (lcsIdx >= lcs.length || oldLines[oldIdx] != lcs[lcsIdx])) {
         result.add(DiffLine(
-          oldLineNumber: oldIndex + 1,
-          content: oldLines[oldIndex],
+          oldLineNumber: oldIdx + 1,
+          content: oldLines[oldIdx],
           type: DiffLineType.removed,
         ));
-        oldIndex++;
-      } else if (newIndex < newLines.length &&
-          (lcsIndex >= lcs.length || newLines[newIndex] != lcs[lcsIndex])) {
+        oldIdx++;
+      } else if (newIdx < newLines.length &&
+          (lcsIdx >= lcs.length || newLines[newIdx] != lcs[lcsIdx])) {
         result.add(DiffLine(
           newLineNumber: newLineNum,
-          content: newLines[newIndex],
+          content: newLines[newIdx],
           type: DiffLineType.added,
         ));
-        newIndex++;
+        newIdx++;
         newLineNum++;
       } else {
         break;
@@ -415,7 +341,7 @@ class DiffGenerator {
     return result;
   }
   
-  List<String> _longestCommonSubsequence(List<String> a, List<String> b) {
+  List<String> _lcs(List<String> a, List<String> b) {
     final m = a.length;
     final n = b.length;
     final dp = List.generate(m + 1, (_) => List.filled(n + 1, 0));
