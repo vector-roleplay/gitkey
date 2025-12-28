@@ -19,6 +19,23 @@ class _ParserScreenState extends State<ParserScreen> {
   Set<int> _selectedIndices = {};
   List<String> _errors = [];
   bool _isProcessing = false;
+  bool _hasText = false;  // 新增：跟踪是否有文本
+  
+  @override
+  void initState() {
+    super.initState();
+    // 监听文本变化
+    _controller.addListener(_onTextChanged);
+  }
+  
+  void _onTextChanged() {
+    final hasText = _controller.text.isNotEmpty;
+    if (hasText != _hasText) {
+      setState(() {
+        _hasText = hasText;
+      });
+    }
+  }
   
   void _parseMessage() {
     final parser = context.read<ParserService>();
@@ -122,6 +139,7 @@ class _ParserScreenState extends State<ParserScreen> {
 
   @override
   void dispose() {
+    _controller.removeListener(_onTextChanged);
     _controller.dispose();
     super.dispose();
   }
@@ -140,6 +158,7 @@ class _ParserScreenState extends State<ParserScreen> {
                 _instructions = [];
                 _selectedIndices = {};
                 _errors = [];
+                _hasText = false;
               });
             },
           ),
@@ -172,7 +191,7 @@ class _ParserScreenState extends State<ParserScreen> {
             child: SizedBox(
               width: double.infinity,
               child: FilledButton.icon(
-                onPressed: _controller.text.isEmpty ? null : _parseMessage,
+                onPressed: _hasText ? _parseMessage : null,  // 使用 _hasText
                 icon: const Icon(Icons.code),
                 label: const Text('解析消息'),
               ),
