@@ -43,6 +43,82 @@ jobs:
       - name: Get dependencies
         run: flutter pub get
       
+      # 创建签名文件
+      - name: Create key.properties
+        run: |
+          echo "storePassword=android" >> android/key.properties
+          echo "keyPassword=android" >> android/key.properties
+          echo "keyAlias=androiddebugkey" >> android/key.properties
+          echo "storeFile=debug.keystore" >> android/key.properties
+      
+      # 下载固定的 debug keystore
+      - name: Setup signing
+        run: |
+          cd android/app
+          keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Debug,OU=Debug,O=Debug,L=Debug,ST=Debug,C=US" -noprompt
+      
+      # 修改 build.gradle 使用签名
+      - name: Configure signing
+        run: |
+          cat > android/app/build.gradle << 'EOF'
+          plugins {
+              id "com.android.application"
+              id "kotlin-android"
+              id "dev.flutter.flutter-gradle-plugin"
+          }
+          
+          def keystoreProperties = new Properties()
+          def keystorePropertiesFile = rootProject.file('key.properties')
+          if (keystorePropertiesFile.exists()) {
+              keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+          }
+          
+          android {
+              namespace = "com.example.ai_code_sync"
+              compileSdk = flutter.compileSdkVersion
+              ndkVersion = flutter.ndkVersion
+          
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_1_8
+                  targetCompatibility = JavaVersion.VERSION_1_8
+              }
+          
+              kotlinOptions {
+                  jvmTarget = JavaVersion.VERSION_1_8
+              }
+          
+              signingConfigs {
+                  release {
+                      keyAlias keystoreProperties['keyAlias']
+                      keyPassword keystoreProperties['keyPassword']
+                      storeFile file(keystoreProperties['storeFile'])
+                      storePassword keystoreProperties['storePassword']
+                  }
+              }
+          
+              defaultConfig {
+                  applicationId = "com.example.ai_code_sync"
+                  minSdk = 21
+                  targetSdk = flutter.targetSdkVersion
+                  versionCode = flutter.versionCode
+                  versionName = flutter.versionName
+              }
+          
+              buildTypes {
+                  release {
+                      signingConfig = signingConfigs.release
+                  }
+                  debug {
+                      signingConfig = signingConfigs.release
+                  }
+              }
+          }
+          
+          flutter {
+              source = "../.."
+          }
+          EOF
+      
       - name: Build APK
         run: |
           if [ "${{ github.event.inputs.build_type }}" == "release" ]; then
