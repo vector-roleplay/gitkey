@@ -33,45 +33,52 @@ jobs:
       
       - name: Create Flutter project
         run: |
-          cp -r lib lib_backup
-          cp pubspec.yaml pubspec_backup.yaml
-          flutter create --platforms=android --org=com.example --project-name=ai_code_sync .
+          # 保存 lib 目录
+          cp -r lib /tmp/lib_backup
+          
+          # 清空目录（保留 .git 和 .github）
+          find . -mindepth 1 -maxdepth 1 ! -name '.git' ! -name '.github' -exec rm -rf {} +
+          
+          # 创建全新 Flutter 项目
+          flutter create --org com.example --project-name ai_code_sync --platforms android .
+          
+          # 用保存的 lib 替换
           rm -rf lib
-          mv lib_backup lib
-          mv pubspec_backup.yaml pubspec.yaml
-
-      - name: Fix Android config
+          cp -r /tmp/lib_backup lib
+          
+      - name: Update pubspec.yaml
         run: |
-          # AndroidManifest.xml 添加网络权限
-          cat > android/app/src/main/AndroidManifest.xml << 'MANIFEST'
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-              <uses-permission android:name="android.permission.INTERNET"/>
-              <application
-                  android:label="AI Code Sync"
-                  android:name="${applicationName}"
-                  android:icon="@mipmap/ic_launcher"
-                  android:usesCleartextTraffic="true">
-                  <activity
-                      android:name=".MainActivity"
-                      android:exported="true"
-                      android:launchMode="singleTop"
-                      android:taskAffinity=""
-                      android:theme="@style/LaunchTheme"
-                      android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
-                      android:hardwareAccelerated="true"
-                      android:windowSoftInputMode="adjustResize">
-                      <meta-data
-                          android:name="io.flutter.embedding.android.NormalTheme"
-                          android:resource="@style/NormalTheme"/>
-                      <intent-filter>
-                          <action android:name="android.intent.action.MAIN"/>
-                          <category android:name="android.intent.category.LAUNCHER"/>
-                      </intent-filter>
-                  </activity>
-              </application>
-          </manifest>
-          MANIFEST
-
+          cat > pubspec.yaml << 'EOF'
+          name: ai_code_sync
+          description: AI Code Sync
+          publish_to: 'none'
+          version: 1.0.0+1
+          
+          environment:
+            sdk: ^3.0.0
+          
+          dependencies:
+            flutter:
+              sdk: flutter
+            http: any
+            shared_preferences: any
+            provider: any
+            cupertino_icons: any
+          
+          dev_dependencies:
+            flutter_test:
+              sdk: flutter
+            flutter_lints: any
+          
+          flutter:
+            uses-material-design: true
+          EOF
+          
+      - name: Add Internet permission
+        run: |
+          sed -i '/<manifest xmlns/a\    <uses-permission android:name="android.permission.INTERNET"/>' android/app/src/main/AndroidManifest.xml
+          cat android/app/src/main/AndroidManifest.xml
+          
       - name: Get dependencies
         run: flutter pub get
       
