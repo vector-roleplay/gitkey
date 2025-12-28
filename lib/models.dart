@@ -25,11 +25,13 @@ enum FileChangeStatus {
 }
 
 /// 指令基类
+
 class Instruction {
   final String filePath;
   final OperationType type;
   final String? content;
   final String? anchor;
+  final String? anchorEnd;  // 新增：结束锚点
   final String? replaceWith;
   final AnchorMode anchorMode;
   final bool isRegex;
@@ -39,6 +41,7 @@ class Instruction {
     required this.type,
     this.content,
     this.anchor,
+    this.anchorEnd,  // 新增
     this.replaceWith,
     this.anchorMode = AnchorMode.exact,
     this.isRegex = false,
@@ -49,14 +52,13 @@ class Instruction {
       case OperationType.create: return '创建文件';
       case OperationType.replace: return '替换文件';
       case OperationType.deleteFile: return '删除文件';
-      case OperationType.findReplace: return '查找替换';
+      case OperationType.findReplace: return '替换代码段';
       case OperationType.insertBefore: return '在锚点前插入';
       case OperationType.insertAfter: return '在锚点后插入';
       case OperationType.deleteContent: return '删除代码段';
     }
   }
 }
-
 /// 文件变更
 class FileChange {
   final String filePath;
