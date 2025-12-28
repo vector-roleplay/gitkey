@@ -10,6 +10,11 @@ class ParserService {
     final filePattern = RegExp(r'\[FILE\]\s*(.+?)(?=\n|\[)', caseSensitive: false);
     final fileMatches = filePattern.allMatches(message).toList();
     
+    if (fileMatches.isEmpty) {
+      errors.add('未找到 [FILE] 标记');
+      return ParseResult(instructions: instructions, errors: errors);
+    }
+    
     for (var i = 0; i < fileMatches.length; i++) {
       final filePath = fileMatches[i].group(1)!.trim();
       final startIndex = fileMatches[i].end;
@@ -20,6 +25,9 @@ class ParserService {
       
       try {
         final fileInstructions = _parseFileBlock(filePath, content);
+        if (fileInstructions.isEmpty) {
+          errors.add('$filePath: 未识别到有效操作');
+        }
         instructions.addAll(fileInstructions);
       } catch (e) {
         errors.add('解析 $filePath 失败: $e');
@@ -32,38 +40,8 @@ class ParserService {
   List<Instruction> _parseFileBlock(String filePath, String content) {
     final instructions = <Instruction>[];
     
-    // [CREATE]
-    final createPattern = RegExp(
-      r'\[CREATE\]\s*```\w*\n([\s\S]*?)```\s*\[/CREATE\]',
-      caseSensitive: false,
-    );
-    final createMatch = createPattern.firstMatch(content);
-    if (createMatch != null) {
-      instructions.add(Instruction(
-        filePath: filePath,
-        type: OperationType.create,
-        content: createMatch.group(1)!.trimRight(),
-      ));
-      return instructions;
-    }
-    
-    // [REPLACE]
-    final replacePattern = RegExp(
-      r'\[REPLACE\]\s*```\w*\n([\s\S]*?)```\s*$$/REPLACE$$',
-      caseSensitive: false,
-    );
-    final replaceMatch = replacePattern.firstMatch(content);
-    if (replaceMatch != null) {
-      instructions.add(Instruction(
-        filePath: filePath,
-        type: OperationType.replace,
-        content: replaceMatch.group(1)!.trimRight(),
-      ));
-      return instructions;
-    }
-    
     // [DELETE_FILE]
-    if (RegExp(r'$$DELETE_FILE$$', caseSensitive: false).hasMatch(content)) {
+    if (RegExp(r'\[DELETE_FILE\]', caseSensitive: false).hasMatch(content)) {
       instructions.add(Instruction(
         filePath: filePath,
         type: OperationType.deleteFile,
@@ -71,13 +49,43 @@ class ParserService {
       return instructions;
     }
     
+    // [CREATE] - 简化版，支持有或没有代码块标记
+    final createPattern = RegExp(
+      r'\[CREATE\]\s*(?:```\w*\n?)?([\s\S]*?)(?:```\s*)?\[/CREATE\]',
+      caseSensitive: false,
+    );
+    final createMatch = createPattern.firstMatch(content);
+    if (createMatch != null) {
+      instructions.add(Instruction(
+        filePath: filePath,
+        type: OperationType.create,
+        content: createMatch.group(1)!.trim(),
+      ));
+      return instructions;
+    }
+    
+    // [REPLACE] - 简化版
+    final replacePattern = RegExp(
+      r'\[REPLACE\]\s*(?:```\w*\n?)?([\s\S]*?)(?:```\s*)?\[/REPLACE\]',
+      caseSensitive: false,
+    );
+    final replaceMatch = replacePattern.firstMatch(content);
+    if (replaceMatch != null) {
+      instructions.add(Instruction(
+        filePath: filePath,
+        type: OperationType.replace,
+        content: replaceMatch.group(1)!.trim(),
+      ));
+      return instructions;
+    }
+    
     // [FIND]...[/FIND] + [REPLACE_WITH]...[/REPLACE_WITH]
     final findPattern = RegExp(
-      r'$$FIND(?::(\w+))?$$\s*\n?([\s\S]*?)$$/FIND$$',
+      r'\[FIND(?::(\w+))?\]\s*\n?([\s\S]*?)\[/FIND\]',
       caseSensitive: false,
     );
     final replaceWithPattern = RegExp(
-      r'$$REPLACE_WITH$$\s*\n?([\s\S]*?)$$/REPLACE_WITH$$',
+      r'\[REPLACE_WITH\]\s*\n?([\s\S]*?)\[/REPLACE_WITH\]',
       caseSensitive: false,
     );
     
@@ -106,10 +114,10 @@ class ParserService {
   }
   
   void _parseInsertOperations(String filePath, String content, List<Instruction> instructions) {
-    final insertAfterPattern = RegExp(r'$$INSERT_AFTER(?::(\w+))?$$', caseSensitive: false);
-    final insertBeforePattern = RegExp(r'$$INSERT_BEFORE(?::(\w+))?$$', caseSensitive: false);
-    final anchorPattern = RegExp(r'$$ANCHOR$$\s*\n?([\s\S]*?)$$/ANCHOR$$', caseSensitive: false);
-    final contentPattern = RegExp(r'$$CONTENT$$\s*\n?([\s\S]*?)$$/CONTENT$$', caseSensitive: false);
+    final insertAfterPattern = RegExp(r'\[INSERT_AFTER(?::(\w+))?\]', caseSensitive: false);
+    final insertBeforePattern = RegExp(r'\[INSERT_BEFORE(?::(\w+))?\]', caseSensitive: false);
+    final anchorPattern = RegExp(r'\[ANCHOR\]\s*\n?([\s\S]*?)\[/ANCHOR\]', caseSensitive: false);
+    final contentPattern = RegExp(r'\[CONTENT\]\s*\n?([\s\S]*?)\[/CONTENT\]', caseSensitive: false);
     
     // INSERT_AFTER
     final afterMatch = insertAfterPattern.firstMatch(content);
@@ -153,8 +161,8 @@ class ParserService {
   }
   
   void _parseDeleteOperations(String filePath, String content, List<Instruction> instructions) {
-    final deletePattern = RegExp(r'$$DELETE(?::(\w+))?$$', caseSensitive: false);
-    final anchorPattern = RegExp(r'$$ANCHOR$$\s*\n?([\s\S]*?)$$/ANCHOR$$', caseSensitive: false);
+    final deletePattern = RegExp(r'\[DELETE(?::(\w+))?\]', caseSensitive: false);
+    final anchorPattern = RegExp(r'\[ANCHOR\]\s*\n?([\s\S]*?)\[/ANCHOR\]', caseSensitive: false);
     
     final deleteMatch = deletePattern.firstMatch(content);
     if (deleteMatch != null) {
@@ -182,15 +190,6 @@ class ParserService {
       default: return AnchorMode.exact;
     }
   }
-  
-  /// 提取文件路径列表
-  List<String> extractFilePaths(String message) {
-    final pattern = RegExp(r'$$FILE$$\s*(.+?)(?=\n|\[)', caseSensitive: false);
-    return pattern.allMatches(message)
-        .map((m) => m.group(1)!.trim())
-        .toSet()
-        .toList();
-  }
 }
 
 class ParseResult {
@@ -199,7 +198,6 @@ class ParseResult {
   
   ParseResult({required this.instructions, required this.errors});
 }
-
 
 /// 代码合并器
 class CodeMerger {
@@ -241,7 +239,7 @@ class CodeMerger {
     final location = _locate(content, anchor, instruction.anchorMode, instruction.isRegex);
     
     if (location == null) {
-      return MergeResult(success: false, error: '未找到锚点: ${anchor.substring(0, anchor.length.clamp(0, 50))}...');
+      return MergeResult(success: false, error: '未找到锚点');
     }
     
     final newContent = content.substring(0, location.start) +
@@ -312,7 +310,6 @@ class CodeMerger {
     return MergeResult(success: true, content: newContent);
   }
   
-  /// 定位锚点
   _Location? _locate(String content, String anchor, AnchorMode mode, bool isRegex) {
     if (isRegex || mode == AnchorMode.regex) {
       return _locateByRegex(content, anchor);
@@ -331,7 +328,6 @@ class CodeMerger {
   }
   
   _Location? _locateIgnoreSpace(String content, String anchor) {
-    // 将锚点转为忽略空白的正则
     final parts = anchor.trim().split(RegExp(r'\s+'));
     final pattern = parts.map((p) => RegExp.escape(p)).join(r'\s*');
     return _locateByRegex(content, pattern);
@@ -371,7 +367,6 @@ class DiffGenerator {
     
     final result = <DiffLine>[];
     
-    // 简化的LCS算法
     final lcs = _longestCommonSubsequence(oldLines, newLines);
     
     var oldIndex = 0;
@@ -385,7 +380,6 @@ class DiffGenerator {
           newIndex < newLines.length &&
           oldLines[oldIndex] == lcs[lcsIndex] &&
           newLines[newIndex] == lcs[lcsIndex]) {
-        // 相同行
         result.add(DiffLine(
           oldLineNumber: oldIndex + 1,
           newLineNumber: newLineNum,
@@ -398,7 +392,6 @@ class DiffGenerator {
         newLineNum++;
       } else if (oldIndex < oldLines.length &&
           (lcsIndex >= lcs.length || oldLines[oldIndex] != lcs[lcsIndex])) {
-        // 删除的行
         result.add(DiffLine(
           oldLineNumber: oldIndex + 1,
           content: oldLines[oldIndex],
@@ -407,7 +400,6 @@ class DiffGenerator {
         oldIndex++;
       } else if (newIndex < newLines.length &&
           (lcsIndex >= lcs.length || newLines[newIndex] != lcs[lcsIndex])) {
-        // 新增的行
         result.add(DiffLine(
           newLineNumber: newLineNum,
           content: newLines[newIndex],
@@ -438,7 +430,6 @@ class DiffGenerator {
       }
     }
     
-    // 回溯
     final result = <String>[];
     var i = m, j = n;
     while (i > 0 && j > 0) {
