@@ -1,0 +1,33 @@
+name: ai_code_sync
+description: AI Code Sync - 同步AI生成的代码到GitHub
+
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  
+  # 网络请求
+  http:
+  
+  # 本地存储
+  shared_preferences:
+  
+  # 状态管理
+  provider:
+  
+  # 图标
+  cupertino_icons:
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints:
+
+flutter:
+  uses-material-design: true
