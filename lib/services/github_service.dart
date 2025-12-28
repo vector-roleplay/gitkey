@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 import 'package:http/http.dart' as http;
 
 class GitHubService {
@@ -6,32 +7,43 @@ class GitHubService {
   String? _token;
   
   void setToken(String token) {
-    _token = token;
+    _token = token.trim();
   }
   
   Map<String, String> get _headers => {
     'Accept': 'application/vnd.github.v3+json',
-    if (_token != null) 'Authorization': 'token $_token',
+    if (_token != null && _token!.isNotEmpty) 'Authorization': 'token $_token',
   };
   
   /// 验证Token，返回用户名
   Future<String?> validateToken() async {
-    if (_token == null) return null;
+    final result = await validateTokenWithDetails();
+    return result['username'];
+  }
+  
+  /// 验证Token，返回详细信息
+  Future<Map<String, String?>> validateTokenWithDetails() async {
+    if (_token == null || _token!.isEmpty) {
+      return {'error': 'Token 为空'};
+    }
     
     try {
       final response = await http.get(
         Uri.parse('$_baseUrl/user'),
         headers: _headers,
-      );
+      ).timeout(const Duration(seconds: 15));
       
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        return data['login'];
+        return {'username': data['login']};
+      } else {
+        return {'error': 'HTTP ${response.statusCode}'};
       }
+    } on TimeoutException {
+      return {'error': '请求超时(15秒)'};
     } catch (e) {
-      print('验证Token失败: $e');
+      return {'error': e.toString()};
     }
-    return null;
   }
   
   /// 获取文件内容
@@ -48,15 +60,12 @@ class GitHubService {
       final response = await http.get(
         Uri.parse(url),
         headers: _headers,
-      );
+      ).timeout(const Duration(seconds: 15));
       
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        
-        // 解码Base64内容
         final contentBase64 = (data['content'] as String).replaceAll('\n', '');
         final content = utf8.decode(base64Decode(contentBase64));
-        
         return GitHubFileResult(
           success: true,
           content: content,
@@ -67,11 +76,11 @@ class GitHubService {
       } else {
         return GitHubFileResult(
           success: false,
-          error: '获取文件失败: ${response.statusCode}',
+          error: 'HTTP ${response.statusCode}',
         );
       }
     } catch (e) {
-      return GitHubFileResult(success: false, error: '网络错误: $e');
+      return GitHubFileResult(success: false, error: e.toString());
     }
   }
   
@@ -97,7 +106,7 @@ class GitHubService {
         Uri.parse('$_baseUrl/repos/$owner/$repo/contents/$path'),
         headers: {..._headers, 'Content-Type': 'application/json'},
         body: jsonEncode(body),
-      );
+      ).timeout(const Duration(seconds: 30));
       
       if (response.statusCode == 200 || response.statusCode == 201) {
         final data = jsonDecode(response.body);
@@ -108,11 +117,11 @@ class GitHubService {
       } else {
         return GitHubCommitResult(
           success: false,
-          error: '更新失败: ${response.statusCode} - ${response.body}',
+          error: 'HTTP ${response.statusCode}: ${response.body}',
         );
       }
     } catch (e) {
-      return GitHubCommitResult(success: false, error: '网络错误: $e');
+      return GitHubCommitResult(success: false, error: e.toString());
     }
   }
   
@@ -139,7 +148,7 @@ class GitHubService {
       request.headers.addAll({..._headers, 'Content-Type': 'application/json'});
       request.body = jsonEncode(body);
       
-      final streamedResponse = await request.send();
+      final streamedResponse = await request.send().timeout(const Duration(seconds: 30));
       final response = await http.Response.fromStream(streamedResponse);
       
       if (response.statusCode == 200) {
@@ -147,11 +156,11 @@ class GitHubService {
       } else {
         return GitHubCommitResult(
           success: false,
-          error: '删除失败: ${response.statusCode}',
+          error: 'HTTP ${response.statusCode}',
         );
       }
     } catch (e) {
-      return GitHubCommitResult(success: false, error: '网络错误: $e');
+      return GitHubCommitResult(success: false, error: e.toString());
     }
   }
 }
