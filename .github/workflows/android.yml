@@ -1,6 +1,5 @@
 name: Build Android APK
 
-# 手动触发
 on:
   workflow_dispatch:
     inputs:
@@ -31,6 +30,15 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
+      
+      - name: Create Flutter project structure
+        run: |
+          cp -r lib lib_backup
+          cp pubspec.yaml pubspec_backup.yaml
+          flutter create --platforms=android .
+          rm -rf lib
+          mv lib_backup lib
+          mv pubspec_backup.yaml pubspec.yaml
       
       - name: Get dependencies
         run: flutter pub get
