@@ -31,33 +31,26 @@ jobs:
         with:
           channel: 'stable'
       
-      - name: Create Flutter project structure
+      - name: Create Flutter project
         run: |
           cp -r lib lib_backup
           cp pubspec.yaml pubspec_backup.yaml
-          flutter create --platforms=android .
+          flutter create --platforms=android --org=com.example --project-name=ai_code_sync .
           rm -rf lib
           mv lib_backup lib
           mv pubspec_backup.yaml pubspec.yaml
-      
-      # 添加网络权限
-      - name: Add Internet permission
+
+      - name: Fix Android config
         run: |
-          sed -i 's/<manifest xmlns:android/<uses-permission android:name="android.permission.INTERNET"\/>\n<manifest xmlns:android/' android/app/src/main/AndroidManifest.xml
-          sed -i 's/<manifest xmlns:android/<manifest xmlns:android/' android/app/src/main/AndroidManifest.xml
-          
-          # 直接重写 AndroidManifest.xml
-          cat > android/app/src/main/AndroidManifest.xml << 'EOF'
+          # AndroidManifest.xml 添加网络权限
+          cat > android/app/src/main/AndroidManifest.xml << 'MANIFEST'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-              
               <uses-permission android:name="android.permission.INTERNET"/>
-              
               <application
                   android:label="AI Code Sync"
                   android:name="${applicationName}"
                   android:icon="@mipmap/ic_launcher"
                   android:usesCleartextTraffic="true">
-                  
                   <activity
                       android:name=".MainActivity"
                       android:exported="true"
@@ -67,28 +60,18 @@ jobs:
                       android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
                       android:hardwareAccelerated="true"
                       android:windowSoftInputMode="adjustResize">
-                      
                       <meta-data
                           android:name="io.flutter.embedding.android.NormalTheme"
                           android:resource="@style/NormalTheme"/>
-                      
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN"/>
                           <category android:name="android.intent.category.LAUNCHER"/>
                       </intent-filter>
                   </activity>
-                  
               </application>
-              
-              <queries>
-                  <intent>
-                      <action android:name="android.intent.action.PROCESS_TEXT"/>
-                      <data android:mimeType="text/plain"/>
-                  </intent>
-              </queries>
           </manifest>
-          EOF
-      
+          MANIFEST
+
       - name: Get dependencies
         run: flutter pub get
       
