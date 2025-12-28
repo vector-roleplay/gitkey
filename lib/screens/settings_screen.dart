@@ -15,6 +15,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   List<Repository> _repos = [];
   String? _tokenUser;
   bool _hasToken = false;
+  bool _isValidating = false;
+  String? _validateError;
   
   @override
   void initState() {
@@ -29,38 +31,66 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final token = storage.getToken();
     _hasToken = token != null && token.isNotEmpty;
     
-    if (_hasToken) {
-      _tokenUser = await github.validateToken();
-    }
-    
     setState(() {
       _repos = storage.getRepositories();
+      _isValidating = _hasToken;
+      _validateError = null;
+      _tokenUser = null;
     });
+    
+    if (_hasToken) {
+      github.setToken(token!);
+      try {
+        final user = await github.validateToken();
+        setState(() {
+          _tokenUser = user;
+          _isValidating = false;
+          if (user == null) {
+            _validateError = 'Token 无效或已过期';
+          }
+        });
+      } catch (e) {
+        setState(() {
+          _isValidating = false;
+          _validateError = e.toString();
+        });
+      }
+    }
   }
   
   Future<void> _setToken() async {
-    final controller = TextEditingController();
+    final storage = context.read<StorageService>();
+    final currentToken = storage.getToken() ?? '';
+    final controller = TextEditingController(text: currentToken);
+    
     final result = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('设置 GitHub Token'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text('请输入 GitHub Personal Access Token'),
+            const SizedBox(height: 8),
+            Text(
+              '获取方式: GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic)',
+              style: TextStyle(color: Colors.grey[600], fontSize: 12),
+            ),
             const SizedBox(height: 16),
             TextField(
               controller: controller,
-              obscureText: true,
               decoration: const InputDecoration(
                 labelText: 'Token',
+                hintText: 'ghp_xxxxxxxxxxxx',
                 border: OutlineInputBorder(),
               ),
+              maxLines: 2,
             ),
             const SizedBox(height: 8),
             Text(
-              '需要 repo 权限',
-              style: TextStyle(color: Colors.grey[600], fontSize: 12),
+              '需要勾选 repo 权限',
+              style: TextStyle(color: Colors.orange[700], fontSize: 12),
             ),
           ],
         ),
@@ -70,7 +100,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: const Text('取消'),
           ),
           FilledButton(
-            onPressed: () => Navigator.pop(context, controller.text),
+            onPressed: () => Navigator.pop(context, controller.text.trim()),
             child: const Text('保存'),
           ),
         ],
@@ -78,13 +108,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
     
     if (result != null && result.isNotEmpty) {
-      final storage = context.read<StorageService>();
       final github = context.read<GitHubService>();
       
       await storage.setToken(result);
       github.setToken(result);
       
-      _loadData();
+      await _loadData();
     }
   }
   
@@ -104,6 +133,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               controller: ownerController,
               decoration: const InputDecoration(
                 labelText: '用户名/组织名',
+                hintText: '例如: octocat',
                 border: OutlineInputBorder(),
               ),
             ),
@@ -112,6 +142,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               controller: nameController,
               decoration: const InputDecoration(
                 labelText: '仓库名',
+                hintText: '例如: my-repo',
                 border: OutlineInputBorder(),
               ),
             ),
@@ -139,13 +170,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
     
     if (result == true) {
-      final storage = context.read<StorageService>();
-      await storage.addRepository(Repository(
-        owner: ownerController.text.trim(),
-        name: nameController.text.trim(),
-        branch: branchController.text.trim(),
-      ));
-      _loadData();
+      final owner = ownerController.text.trim();
+      final name = nameController.text.trim();
+      final branch = branchController.text.trim();
+      
+      if (owner.isNotEmpty && name.isNotEmpty) {
+        final storage = context.read<StorageService>();
+        await storage.addRepository(Repository(
+          owner: owner,
+          name: name,
+          branch: branch.isNotEmpty ? branch : 'main',
+        ));
+        _loadData();
+      }
     }
   }
   
@@ -200,11 +237,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 trailing: const Icon(Icons.chevron_right),
                 onTap: _setToken,
               ),
+              if (_isValidating)
+                const ListTile(
+                  leading: SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                  title: Text('正在验证 Token...'),
+                ),
               if (_tokenUser != null)
                 ListTile(
-                  leading: const Icon(Icons.person),
-                  title: const Text('已登录用户'),
+                  leading: const Icon(Icons.check_circle, color: Colors.green),
+                  title: const Text('已登录'),
                   subtitle: Text(_tokenUser!),
+                ),
+              if (_validateError != null)
+                ListTile(
+                  leading: const Icon(Icons.error, color: Colors.red),
+                  title: const Text('验证失败'),
+                  subtitle: Text(
+                    _validateError!,
+                    style: const TextStyle(color: Colors.red),
+                  ),
                 ),
             ],
           ),
@@ -218,9 +273,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             children: [
               if (_repos.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.all(16),
-                  child: Text('暂无仓库，点击右上角添加'),
+                const ListTile(
+                  leading: Icon(Icons.info_outline),
+                  title: Text('暂无仓库'),
+                  subtitle: Text('点击右上角 + 添加仓库'),
                 )
               else
                 ..._repos.map((repo) => ListTile(
