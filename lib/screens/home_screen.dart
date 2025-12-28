@@ -69,10 +69,12 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     
     // 移除成功的
-    for (final change in changes) {
-      if (change.status == FileChangeStatus.success) {
-        appState.removeFileChange(change.filePath);
-      }
+    final successPaths = appState.fileChanges
+        .where((c) => c.status == FileChangeStatus.success)
+        .map((c) => c.filePath)
+        .toList();
+    for (final path in successPaths) {
+      appState.removeFileChange(path);
     }
     
     // 保存历史
@@ -180,16 +182,8 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           
           // 底部操作栏
-          if (fileChanges.isNotEmpty)
-            _buildBottomBar(appState),
+          _buildBottomBar(appState, fileChanges.isNotEmpty),
         ],
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () async {
-          await Navigator.pushNamed(context, '/parser');
-        },
-        icon: const Icon(Icons.smart_toy),
-        label: const Text('解析AI消息'),
       ),
     );
   }
@@ -287,9 +281,9 @@ class _HomeScreenState extends State<HomeScreen> {
     };
   }
   
-  Widget _buildBottomBar(AppState appState) {
+  Widget _buildBottomBar(AppState appState, bool hasFiles) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surface,
         boxShadow: [
@@ -300,62 +294,83 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
-      child: Row(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          TextButton(
-            onPressed: () {
-              if (appState.selectedCount == appState.fileChanges.length) {
-                appState.deselectAll();
-              } else {
-                appState.selectAll();
-              }
-            },
-            child: Text(
-              appState.selectedCount == appState.fileChanges.length ? '取消全选' : '全选',
+          // 解析AI消息按钮 - 放在顶部
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: () async {
+                await Navigator.pushNamed(context, '/parser');
+              },
+              icon: const Icon(Icons.smart_toy),
+              label: const Text('解析AI消息'),
             ),
           ),
-          Text(
-            '已选 ${appState.selectedCount}/${appState.fileChanges.length}',
-            style: TextStyle(color: Colors.grey[600]),
-          ),
-          const Spacer(),
-          OutlinedButton(
-            onPressed: () {
-              showDialog(
-                context: context,
-                builder: (context) => AlertDialog(
-                  title: const Text('确认清空'),
-                  content: const Text('确定要清空所有待处理文件吗？'),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(context),
-                      child: const Text('取消'),
-                    ),
-                    TextButton(
-                      onPressed: () {
-                        appState.clearAll();
-                        Navigator.pop(context);
-                      },
-                      child: const Text('清空'),
-                    ),
-                  ],
+          
+          // 如果有文件，显示操作栏
+          if (hasFiles) ...[
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                TextButton(
+                  onPressed: () {
+                    if (appState.selectedCount == appState.fileChanges.length) {
+                      appState.deselectAll();
+                    } else {
+                      appState.selectAll();
+                    }
+                  },
+                  child: Text(
+                    appState.selectedCount == appState.fileChanges.length ? '取消全选' : '全选',
+                  ),
                 ),
-              );
-            },
-            child: const Text('清空'),
-          ),
-          const SizedBox(width: 8),
-          FilledButton.icon(
-            onPressed: _isPushing || appState.selectedCount == 0 ? null : _pushChanges,
-            icon: _isPushing
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.cloud_upload),
-            label: const Text('推送'),
-          ),
+                Text(
+                  '已选 ${appState.selectedCount}/${appState.fileChanges.length}',
+                  style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                ),
+                const Spacer(),
+                OutlinedButton(
+                  onPressed: () {
+                    showDialog(
+                      context: context,
+                      builder: (context) => AlertDialog(
+                        title: const Text('确认清空'),
+                        content: const Text('确定要清空所有待处理文件吗？'),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(context),
+                            child: const Text('取消'),
+                          ),
+                          TextButton(
+                            onPressed: () {
+                              appState.clearAll();
+                              Navigator.pop(context);
+                            },
+                            child: const Text('清空'),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                  child: const Text('清空'),
+                ),
+                const SizedBox(width: 8),
+                FilledButton.icon(
+                  onPressed: _isPushing || appState.selectedCount == 0 ? null : _pushChanges,
+                  icon: _isPushing
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.cloud_upload),
+                  label: const Text('推送'),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
