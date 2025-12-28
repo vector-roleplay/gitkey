@@ -11,7 +11,7 @@ class GitHubService {
   
   Map<String, String> get _headers => {
     'Accept': 'application/vnd.github.v3+json',
-    if (_token != null) 'Authorization': 'Bearer $_token',
+    if (_token != null) 'Authorization': 'token $_token',
   };
   
   /// 验证Token，返回用户名
