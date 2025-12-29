@@ -53,6 +53,8 @@ jobs:
           dependencies:
             flutter:
               sdk: flutter
+            flutter_localizations:
+              sdk: flutter
             http: any
             shared_preferences: any
             provider: any
