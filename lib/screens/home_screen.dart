@@ -240,7 +240,7 @@ class _HomeScreenState extends State<HomeScreen> {
               children: [
                 _buildOperationChip(change.operationType),
                 const SizedBox(width: 8),
-                _buildStatusIcon(change.status),
+                _buildStatusIcon(change.status, change),
               ],
             ),
             onTap: () {
@@ -272,13 +272,81 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
   
-  Widget _buildStatusIcon(FileChangeStatus status) {
-    return switch (status) {
+  Widget _buildStatusIcon(FileChangeStatus status, FileChange change) {
+    final icon = switch (status) {
       FileChangeStatus.pending => const Icon(Icons.schedule, color: Colors.grey),
       FileChangeStatus.success => const Icon(Icons.check_circle, color: Colors.green),
       FileChangeStatus.failed => const Icon(Icons.error, color: Colors.red),
       FileChangeStatus.anchorNotFound => const Icon(Icons.warning, color: Colors.orange),
     };
+    
+    // 如果有错误信息，点击可查看
+    if (change.errorMessage != null && change.errorMessage!.isNotEmpty) {
+      return GestureDetector(
+        onTap: () => _showErrorDialog(change),
+        child: icon,
+      );
+    }
+    
+    return icon;
+  }
+  
+  void _showErrorDialog(FileChange change) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(
+              change.status == FileChangeStatus.failed ? Icons.error : Icons.warning,
+              color: change.status == FileChangeStatus.failed ? Colors.red : Colors.orange,
+            ),
+            const SizedBox(width: 8),
+            const Expanded(child: Text('错误详情', style: TextStyle(fontSize: 18))),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                '文件路径',
+                style: TextStyle(color: Colors.grey[600], fontSize: 12),
+              ),
+              const SizedBox(height: 4),
+              SelectableText(
+                change.filePath,
+                style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                '错误信息',
+                style: TextStyle(color: Colors.grey[600], fontSize: 12),
+              ),
+              const SizedBox(height: 4),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.red.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: SelectableText(
+                  change.errorMessage ?? '未知错误',
+                  style: const TextStyle(fontFamily: 'monospace', fontSize: 13, color: Colors.red),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('关闭'),
+          ),
+        ],
+      ),
+    );
   }
   
   Widget _buildBottomBar(AppState appState, bool hasFiles) {
