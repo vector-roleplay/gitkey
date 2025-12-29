@@ -93,11 +93,18 @@ class _HomeScreenState extends State<HomeScreen> {
     
     setState(() => _isPushing = false);
     
+    // 延迟到下一帧显示，避免被状态更新吞掉
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('推送完成: $successCount 成功, $failCount 失败')),
-      );
+      final message = '推送完成: $successCount 成功, $failCount 失败';
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(message)),
+          );
+        }
+      });
     }
+
   }
   
   Future<bool> _pushSingleFile(GitHubService github, Repository repo, FileChange change) async {
