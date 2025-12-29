@@ -80,9 +80,8 @@ class _ParserScreenState extends State<ParserScreen> {
       final filePath = entry.key;
       final instructions = entry.value;
       
-      // 判断是否需要下载
-      final needsDownload = instructions.any((i) =>
-          i.type != OperationType.create && i.type != OperationType.deleteFile);
+      // CREATE 不需要下载，其他都需要（包括 DELETE_FILE 需要获取 SHA）
+      final needsDownload = instructions.any((i) => i.type != OperationType.create);
       
       String? originalContent;
       String? sha;
@@ -97,6 +96,12 @@ class _ParserScreenState extends State<ParserScreen> {
         if (result.success && !result.notFound) {
           originalContent = result.content;
           sha = result.sha;
+        } else if (result.notFound) {
+          // 文件不存在
+          if (instructions.any((i) => i.type == OperationType.deleteFile)) {
+            // 要删除的文件不存在，跳过
+            continue;
+          }
         }
       }
       
@@ -105,14 +110,19 @@ class _ParserScreenState extends State<ParserScreen> {
       bool hasError = false;
       String? errorMsg;
       
-      for (final inst in instructions) {
-        final result = merger.execute(inst, modifiedContent);
-        if (result.success) {
-          modifiedContent = result.content;
-        } else {
-          hasError = true;
-          errorMsg = result.error;
-          break;
+      // DELETE_FILE 不需要合并
+      final isDeleteFile = instructions.any((i) => i.type == OperationType.deleteFile);
+      
+      if (!isDeleteFile) {
+        for (final inst in instructions) {
+          final result = merger.execute(inst, modifiedContent);
+          if (result.success) {
+            modifiedContent = result.content;
+          } else {
+            hasError = true;
+            errorMsg = result.error;
+            break;
+          }
         }
       }
       
@@ -120,7 +130,7 @@ class _ParserScreenState extends State<ParserScreen> {
         filePath: filePath,
         operationType: instructions.first.type,
         originalContent: originalContent,
-        modifiedContent: modifiedContent,
+        modifiedContent: isDeleteFile ? null : modifiedContent,
         status: hasError ? FileChangeStatus.anchorNotFound : FileChangeStatus.pending,
         errorMessage: errorMsg,
         sha: sha,
