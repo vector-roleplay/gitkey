@@ -80,8 +80,9 @@ class _ParserScreenState extends State<ParserScreen> {
       final filePath = entry.key;
       final instructions = entry.value;
       
-      // CREATE 不需要下载，其他都需要（包括 DELETE_FILE 需要获取 SHA）
-      final needsDownload = instructions.any((i) => i.type != OperationType.create);
+      // 只有 CREATE 不需要下载，REPLACE/DELETE_FILE/MODIFY 等都需要获取 SHA
+      final isOnlyCreate = instructions.every((i) => i.type == OperationType.create);
+      final needsDownload = !isOnlyCreate;
       
       String? originalContent;
       String? sha;
