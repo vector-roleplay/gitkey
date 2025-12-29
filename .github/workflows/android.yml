@@ -70,19 +70,33 @@ jobs:
       - name: Add Internet permission
         run: |
           sed -i '/<manifest xmlns/a\    <uses-permission android:name="android.permission.INTERNET"/>' android/app/src/main/AndroidManifest.xml
-          
-      - name: Create signing key
+      
+      - name: Setup Keystore
         run: |
-          keytool -genkey -v \
-            -keystore android/app/upload-keystore.jks \
-            -storetype JKS \
-            -keyalg RSA \
-            -keysize 2048 \
-            -validity 10000 \
-            -alias upload \
-            -storepass android \
-            -keypass android \
-            -dname "CN=AI Code Sync, OU=Dev, O=Dev, L=City, ST=State, C=US"
+          if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
+            echo "使用已保存的密钥"
+            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > android/app/upload-keystore.jks
+          else
+            echo "生成新密钥"
+            keytool -genkey -v \
+              -keystore android/app/upload-keystore.jks \
+              -storetype JKS \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -alias upload \
+              -storepass android \
+              -keypass android \
+              -dname "CN=AI Code Sync, OU=Dev, O=Dev, L=City, ST=State, C=US"
+            
+            echo "=========================================="
+            echo "首次运行请保存以下内容到 GitHub Secrets"
+            echo "名称: KEYSTORE_BASE64"
+            echo "值:"
+            base64 -w 0 android/app/upload-keystore.jks
+            echo ""
+            echo "=========================================="
+          fi
             
       - name: Configure signing
         run: |
