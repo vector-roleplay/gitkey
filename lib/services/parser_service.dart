@@ -5,7 +5,7 @@ class ParserService {
     final instructions = <Instruction>[];
     final errors = <String>[];
     
-    final filePattern = RegExp(r'\[FILE\]\s*(.+?)(?=\n|\[)', caseSensitive: false);
+    final filePattern = RegExp(r'\[FILESISU\]\s*(.+?)(?=\n|\[)', caseSensitive: false);
     final fileMatches = filePattern.allMatches(message).toList();
     
     if (fileMatches.isEmpty) {
