@@ -9,7 +9,7 @@ class ParserService {
     final fileMatches = filePattern.allMatches(message).toList();
     
     if (fileMatches.isEmpty) {
-      errors.add('未找到 [FILE] 标记');
+      errors.add('未找到 [FILESISU] 标记');
       return ParseResult(instructions: instructions, errors: errors);
     }
     
