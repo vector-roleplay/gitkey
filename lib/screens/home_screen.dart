@@ -238,6 +238,27 @@ class _HomeScreenState extends State<HomeScreen> {
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
+                if (change.totalModifications > 1)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    margin: const EdgeInsets.only(right: 4),
+                    decoration: BoxDecoration(
+                      color: change.successfulModifications == change.totalModifications
+                          ? Colors.green.withOpacity(0.2)
+                          : Colors.orange.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      '${change.successfulModifications}/${change.totalModifications}',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: change.successfulModifications == change.totalModifications
+                            ? Colors.green
+                            : Colors.orange,
+                      ),
+                    ),
+                  ),
                 _buildOperationChip(change.operationType),
                 const SizedBox(width: 8),
                 _buildStatusIcon(change.status, change),
