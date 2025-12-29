@@ -280,11 +280,25 @@ class _HomeScreenState extends State<HomeScreen> {
       FileChangeStatus.anchorNotFound => const Icon(Icons.warning, color: Colors.orange),
     };
     
-    // 如果有错误信息，点击可查看
+    // 如果有错误信息，用 IconButton 阻止事件冒泡
     if (change.errorMessage != null && change.errorMessage!.isNotEmpty) {
-      return GestureDetector(
-        onTap: () => _showErrorDialog(change),
-        child: icon,
+      return IconButton(
+        icon: icon,
+        onPressed: () => _showErrorDialog(change),
+        padding: EdgeInsets.zero,
+        constraints: const BoxConstraints(),
+        splashRadius: 20,
+      );
+    }
+    
+    // 如果是失败状态但没有错误信息，也允许点击查看
+    if (status == FileChangeStatus.failed || status == FileChangeStatus.anchorNotFound) {
+      return IconButton(
+        icon: icon,
+        onPressed: () => _showErrorDialog(change),
+        padding: EdgeInsets.zero,
+        constraints: const BoxConstraints(),
+        splashRadius: 20,
       );
     }
     
