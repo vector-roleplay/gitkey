@@ -13,19 +13,34 @@ class HistoryScreen extends StatefulWidget {
 
 class _HistoryScreenState extends State<HistoryScreen> {
   List<OperationHistory> _history = [];
+  bool _isLoading = true;
+  String? _error;
   
   @override
   void initState() {
     super.initState();
-    _loadHistory();
+    // 延迟到下一帧加载，确保 context 可用
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadHistory();
+    });
   }
   
   void _loadHistory() {
-    final storage = context.read<StorageService>();
-    setState(() {
-      _history = storage.getHistory();
-    });
+    try {
+      final storage = context.read<StorageService>();
+      setState(() {
+        _history = storage.getHistory();
+        _isLoading = false;
+        _error = null;
+      });
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+        _error = '加载历史记录失败: $e';
+      });
+    }
   }
+
   
   Future<void> _clearHistory() async {
     final confirm = await showDialog<bool>(
@@ -87,17 +102,40 @@ class _HistoryScreenState extends State<HistoryScreen> {
             ),
         ],
       ),
-      body: _history.isEmpty
-          ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.history, size: 64, color: Colors.grey[400]),
-                  const SizedBox(height: 16),
-                  Text(
-                    '暂无操作历史',
-                    style: TextStyle(fontSize: 16, color: Colors.grey[600]),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : _error != null
+              ? Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.error_outline, size: 64, color: Colors.red[300]),
+                      const SizedBox(height: 16),
+                      Text(
+                        _error!,
+                        style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 16),
+                      OutlinedButton(
+                        onPressed: _loadHistory,
+                        child: const Text('重试'),
+                      ),
+                    ],
                   ),
+                )
+              : _history.isEmpty
+                  ? Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.history, size: 64, color: Colors.grey[400]),
+                          const SizedBox(height: 16),
+                          Text(
+                            '暂无操作历史',
+                            style: TextStyle(fontSize: 16, color: Colors.grey[600]),
+                          ),
+
                 ],
               ),
             )
