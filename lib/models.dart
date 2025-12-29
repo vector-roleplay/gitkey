@@ -1,76 +1,114 @@
+import 'package:flutter/foundation.dart';
+
+/// 仓库信息
+class Repository {
+  final String owner;
+  final String name;
+  final String branch;
+  final bool isDefault;
+
+  Repository({
+    required this.owner,
+    required this.name,
+    this.branch = 'main',
+    this.isDefault = false,
+  });
+
+  String get fullName => '$owner/$name';
+
+  Repository copyWith({
+    String? owner,
+    String? name,
+    String? branch,
+    bool? isDefault,
+  }) {
+    return Repository(
+      owner: owner ?? this.owner,
+      name: name ?? this.name,
+      branch: branch ?? this.branch,
+      isDefault: isDefault ?? this.isDefault,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'owner': owner,
+    'name': name,
+    'branch': branch,
+    'isDefault': isDefault,
+  };
+
+  factory Repository.fromJson(Map<String, dynamic> json) => Repository(
+    owner: json['owner'] as String,
+    name: json['name'] as String,
+    branch: json['branch'] as String? ?? 'main',
+    isDefault: json['isDefault'] as bool? ?? false,
+  );
+}
+
 /// 操作类型
 enum OperationType {
-  create,       // 创建新文件
-  replace,      // 替换整个文件
-  deleteFile,   // 删除文件
-  findReplace,  // 查找替换
-  insertBefore, // 在锚点前插入
-  insertAfter,  // 在锚点后插入
-  deleteContent // 删除代码段
+  create,
+  replace,
+  deleteFile,
+  findReplace,
+  insertBefore,
+  insertAfter,
+  deleteContent,
 }
 
-/// 锚点匹配模式
-enum AnchorMode {
-  exact,       // 精确匹配
-  ignoreSpace, // 忽略空白
-  regex        // 正则表达式
-}
-
-/// 文件变更状态
-enum FileChangeStatus {
-  pending,        // 待处理
-  success,        // 成功
-  failed,         // 失败
-  anchorNotFound  // 锚点未找到
-}
-
-/// 指令基类
-
+/// 解析出的指令
 class Instruction {
   final String filePath;
   final OperationType type;
   final String? content;
+  final String? anchorStart;
+  final String? anchorEnd;
   final String? anchor;
-  final String? anchorEnd;  // 新增：结束锚点
-  final String? replaceWith;
-  final AnchorMode anchorMode;
-  final bool isRegex;
-  
+
   Instruction({
     required this.filePath,
     required this.type,
     this.content,
+    this.anchorStart,
+    this.anchorEnd,
     this.anchor,
-    this.anchorEnd,  // 新增
-    this.replaceWith,
-    this.anchorMode = AnchorMode.exact,
-    this.isRegex = false,
   });
-  
+
   String get typeDescription {
-    switch (type) {
-      case OperationType.create: return '创建文件';
-      case OperationType.replace: return '替换文件';
-      case OperationType.deleteFile: return '删除文件';
-      case OperationType.findReplace: return '替换代码段';
-      case OperationType.insertBefore: return '在锚点前插入';
-      case OperationType.insertAfter: return '在锚点后插入';
-      case OperationType.deleteContent: return '删除代码段';
-    }
+    return switch (type) {
+      OperationType.create => '创建文件',
+      OperationType.replace => '替换文件',
+      OperationType.deleteFile => '删除文件',
+      OperationType.findReplace => '替换代码段',
+      OperationType.insertBefore => '在锚点前插入',
+      OperationType.insertAfter => '在锚点后插入',
+      OperationType.deleteContent => '删除代码段',
+    };
   }
 }
+
+/// 文件变更状态
+enum FileChangeStatus {
+  pending,
+  success,
+  failed,
+  anchorNotFound,
+}
+
 /// 文件变更
 class FileChange {
   final String filePath;
   final OperationType operationType;
   final String? originalContent;
-  String? modifiedContent;
-  FileChangeStatus status;
-  String? errorMessage;
-  String? sha; // GitHub文件SHA
-  final List<Instruction> instructions;
-  bool isSelected;
-  
+  final String? modifiedContent;
+  final FileChangeStatus status;
+  final String? errorMessage;
+  final String? sha;
+  final bool isSelected;
+  final List<Instruction>? instructions;
+  final int totalModifications;
+  final int successfulModifications;
+
   FileChange({
     required this.filePath,
     required this.operationType,
@@ -79,10 +117,12 @@ class FileChange {
     this.status = FileChangeStatus.pending,
     this.errorMessage,
     this.sha,
-    this.instructions = const [],
     this.isSelected = true,
+    this.instructions,
+    this.totalModifications = 1,
+    this.successfulModifications = 1,
   });
-  
+
   FileChange copyWith({
     String? filePath,
     OperationType? operationType,
@@ -91,8 +131,10 @@ class FileChange {
     FileChangeStatus? status,
     String? errorMessage,
     String? sha,
-    List<Instruction>? instructions,
     bool? isSelected,
+    List<Instruction>? instructions,
+    int? totalModifications,
+    int? successfulModifications,
   }) {
     return FileChange(
       filePath: filePath ?? this.filePath,
@@ -102,41 +144,34 @@ class FileChange {
       status: status ?? this.status,
       errorMessage: errorMessage ?? this.errorMessage,
       sha: sha ?? this.sha,
-      instructions: instructions ?? this.instructions,
       isSelected: isSelected ?? this.isSelected,
+      instructions: instructions ?? this.instructions,
+      totalModifications: totalModifications ?? this.totalModifications,
+      successfulModifications: successfulModifications ?? this.successfulModifications,
     );
   }
 }
 
-/// 仓库配置
-class Repository {
-  final String owner;
-  final String name;
-  final String branch;
-  final bool isDefault;
-  
-  Repository({
-    required this.owner,
-    required this.name,
-    this.branch = 'main',
-    this.isDefault = false,
+/// 差异行类型
+enum DiffLineType {
+  added,
+  removed,
+  unchanged,
+}
+
+/// 差异行
+class DiffLine {
+  final DiffLineType type;
+  final String content;
+  final int? oldLineNumber;
+  final int? newLineNumber;
+
+  DiffLine({
+    required this.type,
+    required this.content,
+    this.oldLineNumber,
+    this.newLineNumber,
   });
-  
-  String get fullName => '$owner/$name';
-  
-  Map<String, dynamic> toJson() => {
-    'owner': owner,
-    'name': name,
-    'branch': branch,
-    'isDefault': isDefault,
-  };
-  
-  factory Repository.fromJson(Map<String, dynamic> json) => Repository(
-    owner: json['owner'],
-    name: json['name'],
-    branch: json['branch'] ?? 'main',
-    isDefault: json['isDefault'] ?? false,
-  );
 }
 
 /// 操作历史
@@ -146,7 +181,7 @@ class OperationHistory {
   final String repositoryName;
   final List<FileChangeRecord> changes;
   final bool isSuccessful;
-  
+
   OperationHistory({
     required this.id,
     required this.timestamp,
@@ -154,7 +189,7 @@ class OperationHistory {
     required this.changes,
     required this.isSuccessful,
   });
-  
+
   Map<String, dynamic> toJson() => {
     'id': id,
     'timestamp': timestamp.toIso8601String(),
@@ -162,58 +197,41 @@ class OperationHistory {
     'changes': changes.map((c) => c.toJson()).toList(),
     'isSuccessful': isSuccessful,
   };
-  
+
   factory OperationHistory.fromJson(Map<String, dynamic> json) => OperationHistory(
-    id: json['id'],
-    timestamp: DateTime.parse(json['timestamp']),
-    repositoryName: json['repositoryName'],
+    id: json['id'] as String,
+    timestamp: DateTime.parse(json['timestamp'] as String),
+    repositoryName: json['repositoryName'] as String,
     changes: (json['changes'] as List).map((c) => FileChangeRecord.fromJson(c)).toList(),
-    isSuccessful: json['isSuccessful'],
+    isSuccessful: json['isSuccessful'] as bool,
   );
 }
 
-/// 文件变更记录（用于历史）
+/// 文件变更记录
 class FileChangeRecord {
   final String filePath;
   final OperationType operationType;
   final String? originalContent;
   final String? modifiedContent;
-  
+
   FileChangeRecord({
     required this.filePath,
     required this.operationType,
     this.originalContent,
     this.modifiedContent,
   });
-  
+
   Map<String, dynamic> toJson() => {
     'filePath': filePath,
-    'operationType': operationType.index,
+    'operationType': operationType.name,
     'originalContent': originalContent,
     'modifiedContent': modifiedContent,
   };
-  
+
   factory FileChangeRecord.fromJson(Map<String, dynamic> json) => FileChangeRecord(
-    filePath: json['filePath'],
-    operationType: OperationType.values[json['operationType']],
-    originalContent: json['originalContent'],
-    modifiedContent: json['modifiedContent'],
+    filePath: json['filePath'] as String,
+    operationType: OperationType.values.firstWhere((e) => e.name == json['operationType']),
+    originalContent: json['originalContent'] as String?,
+    modifiedContent: json['modifiedContent'] as String?,
   );
 }
-
-/// Diff行
-class DiffLine {
-  final int? oldLineNumber;
-  final int? newLineNumber;
-  final String content;
-  final DiffLineType type;
-  
-  DiffLine({
-    this.oldLineNumber,
-    this.newLineNumber,
-    required this.content,
-    required this.type,
-  });
-}
-
-enum DiffLineType { unchanged, added, removed }
