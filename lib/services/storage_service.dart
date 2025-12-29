@@ -87,11 +87,17 @@ class StorageService {
   // ========== 历史记录 ==========
   
   List<OperationHistory> getHistory() {
-    final json = _prefs.getString(_historyKey);
-    if (json == null) return [];
-    final list = jsonDecode(json) as List;
-    return list.map((e) => OperationHistory.fromJson(e)).toList();
+    try {
+      final json = _prefs.getString(_historyKey);
+      if (json == null || json.isEmpty) return [];
+      final list = jsonDecode(json) as List;
+      return list.map((e) => OperationHistory.fromJson(e)).toList();
+    } catch (e) {
+      // 解析失败时返回空列表，避免崩溃
+      return [];
+    }
   }
+
   
   Future<void> addHistory(OperationHistory history) async {
     final list = getHistory();
