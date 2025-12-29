@@ -64,6 +64,7 @@ class Instruction {
   final String? anchorStart;
   final String? anchorEnd;
   final String? anchor;
+  final String? replaceWith;
 
   Instruction({
     required this.filePath,
@@ -72,6 +73,7 @@ class Instruction {
     this.anchorStart,
     this.anchorEnd,
     this.anchor,
+    this.replaceWith,
   });
 
   String get typeDescription {
