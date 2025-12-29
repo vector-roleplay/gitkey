@@ -15,16 +15,17 @@ class ParserScreen extends StatefulWidget {
 
 class _ParserScreenState extends State<ParserScreen> {
   final _controller = TextEditingController();
+  final _scrollController = ScrollController();
   List<Instruction> _instructions = [];
   Set<int> _selectedIndices = {};
   List<String> _errors = [];
   bool _isProcessing = false;
-  bool _hasText = false;  // 新增：跟踪是否有文本
+  bool _hasText = false;
+  List<int> _fileMarkerPositions = [];
   
   @override
   void initState() {
     super.initState();
-    // 监听文本变化
     _controller.addListener(_onTextChanged);
   }
   
@@ -35,6 +36,59 @@ class _ParserScreenState extends State<ParserScreen> {
         _hasText = hasText;
       });
     }
+    _updateFileMarkerPositions();
+  }
+  
+  void _updateFileMarkerPositions() {
+    final text = _controller.text;
+    final pattern = RegExp(r'\[FILESISU\]', caseSensitive: false);
+    _fileMarkerPositions = pattern.allMatches(text).map((m) => m.start).toList();
+  }
+  
+  void _scrollToTop() {
+    _scrollController.jumpTo(0);
+  }
+  
+  void _scrollToBottom() {
+    _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+  }
+  
+  void _scrollToPreviousFile() {
+    final currentPosition = _controller.selection.baseOffset;
+    if (currentPosition <= 0) return;
+    
+    for (int i = _fileMarkerPositions.length - 1; i >= 0; i--) {
+      if (_fileMarkerPositions[i] < currentPosition - 1) {
+        _controller.selection = TextSelection.collapsed(offset: _fileMarkerPositions[i]);
+        _ensureCursorVisible();
+        break;
+      }
+    }
+  }
+  
+  void _scrollToNextFile() {
+    final currentPosition = _controller.selection.baseOffset;
+    
+    for (int i = 0; i < _fileMarkerPositions.length; i++) {
+      if (_fileMarkerPositions[i] > currentPosition) {
+        _controller.selection = TextSelection.collapsed(offset: _fileMarkerPositions[i]);
+        _ensureCursorVisible();
+        break;
+      }
+    }
+  }
+  
+  void _ensureCursorVisible() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        final textLength = _controller.text.length;
+        if (textLength == 0) return;
+        final cursorPosition = _controller.selection.baseOffset;
+        final ratio = cursorPosition / textLength;
+        final targetScroll = _scrollController.position.maxScrollExtent * ratio;
+        _scrollController.jumpTo(targetScroll.clamp(0, _scrollController.position.maxScrollExtent));
+      }
+    });
   }
   
   void _parseMessage() {
@@ -67,7 +121,6 @@ class _ParserScreenState extends State<ParserScreen> {
       return;
     }
     
-    // 按文件分组
     final selectedInstructions = _selectedIndices.map((i) => _instructions[i]).toList();
     final byFile = <String, List<Instruction>>{};
     for (final inst in selectedInstructions) {
@@ -80,7 +133,6 @@ class _ParserScreenState extends State<ParserScreen> {
       final filePath = entry.key;
       final instructions = entry.value;
       
-      // 只有 CREATE 不需要下载，REPLACE/DELETE_FILE/MODIFY 等都需要获取 SHA
       final isOnlyCreate = instructions.every((i) => i.type == OperationType.create);
       final needsDownload = !isOnlyCreate;
       
@@ -98,20 +150,16 @@ class _ParserScreenState extends State<ParserScreen> {
           originalContent = result.content;
           sha = result.sha;
         } else if (result.notFound) {
-          // 文件不存在
           if (instructions.any((i) => i.type == OperationType.deleteFile)) {
-            // 要删除的文件不存在，跳过
             continue;
           }
         }
       }
       
-      // 执行合并
       String? modifiedContent = originalContent;
       bool hasError = false;
       String? errorMsg;
       
-      // DELETE_FILE 不需要合并
       final isDeleteFile = instructions.any((i) => i.type == OperationType.deleteFile);
       
       if (!isDeleteFile) {
@@ -152,17 +200,20 @@ class _ParserScreenState extends State<ParserScreen> {
   void dispose() {
     _controller.removeListener(_onTextChanged);
     _controller.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      resizeToAvoidBottomInset: true,
       appBar: AppBar(
         title: const Text('解析AI消息'),
         actions: [
           IconButton(
             icon: const Icon(Icons.clear),
+            tooltip: '清空',
             onPressed: () {
               _controller.clear();
               setState(() {
@@ -170,6 +221,7 @@ class _ParserScreenState extends State<ParserScreen> {
                 _selectedIndices = {};
                 _errors = [];
                 _hasText = false;
+                _fileMarkerPositions = [];
               });
             },
           ),
@@ -177,41 +229,87 @@ class _ParserScreenState extends State<ParserScreen> {
       ),
       body: Column(
         children: [
-          // 输入区域
           Expanded(
             flex: 2,
             child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: TextField(
-                controller: _controller,
-                maxLines: null,
-                expands: true,
-                textAlignVertical: TextAlignVertical.top,
-                decoration: const InputDecoration(
-                  hintText: '粘贴AI回复的消息到这里...',
-                  border: OutlineInputBorder(),
-                  alignLabelWithHint: true,
-                ),
+              padding: const EdgeInsets.fromLTRB(16, 16, 4, 16),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Scrollbar(
+                      controller: _scrollController,
+                      thumbVisibility: true,
+                      thickness: 6,
+                      radius: const Radius.circular(3),
+                      child: TextField(
+                        controller: _controller,
+                        scrollController: _scrollController,
+                        maxLines: null,
+                        expands: true,
+                        textAlignVertical: TextAlignVertical.top,
+                        keyboardType: TextInputType.multiline,
+                        textInputAction: TextInputAction.newline,
+                        style: const TextStyle(
+                          fontFamily: 'monospace',
+                          fontSize: 13,
+                          height: 1.4,
+                        ),
+                        decoration: const InputDecoration(
+                          hintText: '粘贴AI回复的消息到这里...',
+                          border: OutlineInputBorder(),
+                          contentPadding: EdgeInsets.all(12),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      _buildNavButton(
+                        icon: Icons.keyboard_double_arrow_up,
+                        tooltip: '到顶部',
+                        onPressed: _scrollToTop,
+                      ),
+                      const SizedBox(height: 8),
+                      _buildNavButton(
+                        icon: Icons.keyboard_arrow_up,
+                        tooltip: '上一个文件',
+                        onPressed: _scrollToPreviousFile,
+                      ),
+                      const SizedBox(height: 8),
+                      _buildNavButton(
+                        icon: Icons.keyboard_arrow_down,
+                        tooltip: '下一个文件',
+                        onPressed: _scrollToNextFile,
+                      ),
+                      const SizedBox(height: 8),
+                      _buildNavButton(
+                        icon: Icons.keyboard_double_arrow_down,
+                        tooltip: '到底部',
+                        onPressed: _scrollToBottom,
+                      ),
+                    ],
+                  ),
+                ],
               ),
             ),
           ),
           
-          // 解析按钮
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: SizedBox(
               width: double.infinity,
               child: FilledButton.icon(
-                onPressed: _hasText ? _parseMessage : null,  // 使用 _hasText
+                onPressed: _hasText ? _parseMessage : null,
                 icon: const Icon(Icons.code),
                 label: const Text('解析消息'),
               ),
             ),
           ),
           
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
           
-          // 错误信息
           if (_errors.isNotEmpty)
             Container(
               margin: const EdgeInsets.symmetric(horizontal: 16),
@@ -228,12 +326,21 @@ class _ParserScreenState extends State<ParserScreen> {
                     style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red),
                   ),
                   const SizedBox(height: 4),
-                  ..._errors.map((e) => Text('• $e', style: const TextStyle(color: Colors.red))),
+                  ..._errors.take(5).map((e) => Text(
+                    '• $e',
+                    style: const TextStyle(color: Colors.red, fontSize: 12),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  )),
+                  if (_errors.length > 5)
+                    Text(
+                      '... 还有 ${_errors.length - 5} 个错误',
+                      style: const TextStyle(color: Colors.red, fontSize: 12),
+                    ),
                 ],
               ),
             ),
           
-          // 解析结果列表
           if (_instructions.isNotEmpty) ...[
             Padding(
               padding: const EdgeInsets.all(16),
@@ -260,7 +367,7 @@ class _ParserScreenState extends State<ParserScreen> {
               ),
             ),
             Expanded(
-              flex: 3,
+              flex: 2,
               child: ListView.builder(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 itemCount: _instructions.length,
@@ -285,16 +392,17 @@ class _ParserScreenState extends State<ParserScreen> {
                         inst.filePath,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 14),
                       ),
-                      subtitle: Text(inst.typeDescription),
+                      subtitle: Text(inst.typeDescription, style: const TextStyle(fontSize: 12)),
                       secondary: _buildTypeIcon(inst.type),
+                      dense: true,
                     ),
                   );
                 },
               ),
             ),
             
-            // 应用按钮
             Padding(
               padding: const EdgeInsets.all(16),
               child: SizedBox(
@@ -318,6 +426,26 @@ class _ParserScreenState extends State<ParserScreen> {
     );
   }
   
+  Widget _buildNavButton({
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback onPressed,
+  }) {
+    return SizedBox(
+      width: 40,
+      height: 40,
+      child: IconButton(
+        icon: Icon(icon, size: 20),
+        tooltip: tooltip,
+        onPressed: onPressed,
+        style: IconButton.styleFrom(
+          backgroundColor: Theme.of(context).colorScheme.surfaceVariant,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ),
+      ),
+    );
+  }
+  
   Widget _buildTypeIcon(OperationType type) {
     final (icon, color) = switch (type) {
       OperationType.create => (Icons.add_circle, Colors.green),
@@ -328,6 +456,6 @@ class _ParserScreenState extends State<ParserScreen> {
       OperationType.deleteContent => (Icons.remove_circle, Colors.red),
     };
     
-    return Icon(icon, color: color);
+    return Icon(icon, color: color, size: 24);
   }
 }
