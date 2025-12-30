@@ -62,12 +62,14 @@ jobs:
             provider: any
             cupertino_icons: any
             file_picker: any
+            path_provider: any
 
           
           dev_dependencies:
             flutter_test:
               sdk: flutter
             flutter_lints: any
+
           
           flutter:
             uses-material-design: true
