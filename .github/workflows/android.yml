@@ -1,7 +1,5 @@
 name: Build Android APK
 
-# 测试推送 - 可以删除这行注释
-
 on:
   workflow_dispatch:
     inputs:
@@ -28,10 +26,34 @@ jobs:
           distribution: 'zulu'
           java-version: '17'
       
+      # ========== 缓存配置 ==========
+      
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-
+      
+      - name: Cache Pub dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.pub-cache
+          key: pub-${{ hashFiles('**/pubspec.yaml') }}
+          restore-keys: |
+            pub-
+      
+      # ========== Flutter 配置 ==========
+      
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
+          cache: true  # 启用 Flutter SDK 缓存
       
       - name: Create Flutter project
         run: |
@@ -66,11 +88,9 @@ jobs:
             permission_handler: any
           
           dev_dependencies:
-
             flutter_test:
               sdk: flutter
             flutter_lints: any
-
           
           flutter:
             uses-material-design: true
@@ -88,7 +108,6 @@ jobs:
           sed -i 's/<application/<application android:requestLegacyExternalStorage="true"/' android/app/src/main/AndroidManifest.xml
       
       - name: Setup Keystore
-
         run: |
           if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
             echo "使用已保存的密钥"
