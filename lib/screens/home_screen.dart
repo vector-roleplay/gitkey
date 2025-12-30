@@ -143,7 +143,51 @@ class _HomeScreenState extends State<HomeScreen> {
       );
       return result.success;
     }
+  }/// 推送到本地工作区
+  Future<void> _pushToWorkspace(List<FileChange> changes, StorageService storage, AppState appState) async {
+    setState(() => _isPushing = true);
+    
+    int successCount = 0;
+    
+    for (final change in changes) {
+      if (change.operationType == OperationType.deleteFile) {
+        await storage.removeWorkspaceFile(change.filePath);
+      } else {
+        await storage.addOrUpdateWorkspaceFile(WorkspaceFile(
+          path: change.filePath,
+          content: change.modifiedContent ?? '',
+        ));
+      }
+      successCount++;
+      appState.updateFileChange(
+        change.filePath,
+        change.copyWith(status: FileChangeStatus.success),
+      );
+    }
+    
+    // 移除成功的
+    final successPaths = appState.fileChanges
+        .where((c) => c.status == FileChangeStatus.success)
+        .map((c) => c.filePath)
+        .toList();
+    for (final path in successPaths) {
+      appState.removeFileChange(path);
+    }
+    
+    setState(() => _isPushing = false);
+    
+    if (mounted) {
+      final message = '已保存 $successCount 个文件到本地工作区';
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(message)),
+          );
+        }
+      });
+    }
   }
+
 
   @override
   Widget build(BuildContext context) {
