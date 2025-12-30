@@ -23,7 +23,11 @@ void main() async {
     githubService.setToken(token);
   }
   
+  // 加载工作区模式状态
+  final workspaceMode = storageService.getWorkspaceMode();
+  
   runApp(
+
     MultiProvider(
       providers: [
         Provider.value(value: storageService),
@@ -31,12 +35,13 @@ void main() async {
         Provider(create: (_) => ParserService()),
         Provider(create: (_) => CodeMerger()),
         Provider(create: (_) => DiffGenerator()),
-        ChangeNotifierProvider(create: (_) => AppState()),
+        ChangeNotifierProvider(create: (_) => AppState()..setWorkspaceMode(workspaceMode)),
       ],
       child: const MyApp(),
     ),
   );
 }
+
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
