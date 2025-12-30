@@ -163,100 +163,15 @@ class GitHubService {
       return GitHubCommitResult(success: false, error: e.toString());
     }
   }
-}
 
-class GitHubFileResult {
-  final bool success;
-  final String? content;
-  final String? sha;
-  final String? error;
-  final bool notFound;
-  
-  GitHubFileResult({
-    required this.success,
-    this.content,
-    this.sha,
-    this.error,
-    this.notFound = false,
-  });
-}
+  // ========== GitHub Actions API ==========
 
-class GitHubCommitResult {
-  final bool success;
-  final String? sha;
-  final String? error;
-  
-  GitHubCommitResult({
-    required this.success,
-    this.sha,
-    this.error,
-  });
-}
-
-// ========== GitHub Actions API ==========
-
-class WorkflowRun {
-  final int id;
-  final String status; // queued, in_progress, completed
-  final String? conclusion; // success, failure, cancelled
-  final String createdAt;
-  final String? htmlUrl;
-
-  WorkflowRun({
-    required this.id,
-    required this.status,
-    this.conclusion,
-    required this.createdAt,
-    this.htmlUrl,
-  });
-
-  factory WorkflowRun.fromJson(Map<String, dynamic> json) => WorkflowRun(
-    id: json['id'] as int,
-    status: json['status'] as String,
-    conclusion: json['conclusion'] as String?,
-    createdAt: json['created_at'] as String,
-    htmlUrl: json['html_url'] as String?,
-  );
-
-  bool get isCompleted => status == 'completed';
-  bool get isSuccess => conclusion == 'success';
-  bool get isRunning => status == 'in_progress' || status == 'queued';
-}
-
-class Artifact {
-  final int id;
-  final String name;
-  final int sizeInBytes;
-  final String archiveDownloadUrl;
-
-  Artifact({
-    required this.id,
-    required this.name,
-    required this.sizeInBytes,
-    required this.archiveDownloadUrl,
-  });
-
-  factory Artifact.fromJson(Map<String, dynamic> json) => Artifact(
-    id: json['id'] as int,
-    name: json['name'] as String,
-    sizeInBytes: json['size_in_bytes'] as int,
-    archiveDownloadUrl: json['archive_download_url'] as String,
-  );
-
-  String get sizeFormatted {
-    if (sizeInBytes < 1024) return '$sizeInBytes B';
-    if (sizeInBytes < 1024 * 1024) return '${(sizeInBytes / 1024).toStringAsFixed(1)} KB';
-    return '${(sizeInBytes / 1024 / 1024).toStringAsFixed(1)} MB';
-  }
-}
-
-extension GitHubActionsService on GitHubService {
   /// 触发 workflow 构建
   Future<({bool success, String? error})> triggerWorkflow({
     required String owner,
     required String repo,
-    required String workflowId, // 文件名如 android.yml
-    required String ref, // 分支名
+    required String workflowId,
+    required String ref,
     Map<String, String>? inputs,
   }) async {
     try {
@@ -271,7 +186,6 @@ extension GitHubActionsService on GitHubService {
         body: jsonEncode(body),
       ).timeout(const Duration(seconds: 30));
 
-      // 204 表示成功触发
       if (response.statusCode == 204) {
         return (success: true, error: null);
       } else {
@@ -375,11 +289,9 @@ extension GitHubActionsService on GitHubService {
         headers: _headers,
       ).timeout(const Duration(minutes: 5));
 
-      // GitHub 返回 302 重定向
       if (response.statusCode == 200) {
         return (bytes: response.bodyBytes, error: null);
       } else if (response.statusCode == 302) {
-        // 跟随重定向下载
         final redirectUrl = response.headers['location'];
         if (redirectUrl != null) {
           final redirectResponse = await http.get(
@@ -400,3 +312,85 @@ extension GitHubActionsService on GitHubService {
   }
 }
 
+class GitHubFileResult {
+  final bool success;
+  final String? content;
+  final String? sha;
+  final String? error;
+  final bool notFound;
+  
+  GitHubFileResult({
+    required this.success,
+    this.content,
+    this.sha,
+    this.error,
+    this.notFound = false,
+  });
+}
+
+class GitHubCommitResult {
+  final bool success;
+  final String? sha;
+  final String? error;
+  
+  GitHubCommitResult({
+    required this.success,
+    this.sha,
+    this.error,
+  });
+}
+
+class WorkflowRun {
+  final int id;
+  final String status;
+  final String? conclusion;
+  final String createdAt;
+  final String? htmlUrl;
+
+  WorkflowRun({
+    required this.id,
+    required this.status,
+    this.conclusion,
+    required this.createdAt,
+    this.htmlUrl,
+  });
+
+  factory WorkflowRun.fromJson(Map<String, dynamic> json) => WorkflowRun(
+    id: json['id'] as int,
+    status: json['status'] as String,
+    conclusion: json['conclusion'] as String?,
+    createdAt: json['created_at'] as String,
+    htmlUrl: json['html_url'] as String?,
+  );
+
+  bool get isCompleted => status == 'completed';
+  bool get isSuccess => conclusion == 'success';
+  bool get isRunning => status == 'in_progress' || status == 'queued';
+}
+
+class Artifact {
+  final int id;
+  final String name;
+  final int sizeInBytes;
+  final String archiveDownloadUrl;
+
+  Artifact({
+    required this.id,
+    required this.name,
+    required this.sizeInBytes,
+    required this.archiveDownloadUrl,
+  });
+
+  factory Artifact.fromJson(Map<String, dynamic> json) => Artifact(
+    id: json['id'] as int,
+    name: json['name'] as String,
+    sizeInBytes: json['size_in_bytes'] as int,
+    archiveDownloadUrl: json['archive_download_url'] as String,
+  );
+
+  String get sizeFormatted {
+    if (sizeInBytes < 1024) return '$sizeInBytes B';
+    if (sizeInBytes < 1024 * 1024) return '${(sizeInBytes / 1024).toStringAsFixed(1)} KB';
+    return '${(sizeInBytes / 1024 / 1024).toStringAsFixed(1)} MB';
+  }
+}
