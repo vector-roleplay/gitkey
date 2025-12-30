@@ -218,8 +218,10 @@ jobs:
           else
             flutter build apk --debug --target-platform android-arm64
           fi
-
+      
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: app-${{ github.event.inputs.build_type }}
           path: build/app/outputs/flutter-apk/*.apk
+
