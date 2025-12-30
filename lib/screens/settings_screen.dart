@@ -9,11 +9,12 @@ import '../models.dart';
 import '../main.dart';
 
 
-
+class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
+
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
@@ -582,7 +583,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ],
                 ),
               ),
-
+              if (_workspaceFiles.isNotEmpty) ...[
+                const Divider(height: 1),
                 Container(
                   constraints: const BoxConstraints(maxHeight: 300),
                   child: ListView.builder(
@@ -590,7 +592,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     itemCount: _workspaceFiles.length,
                     itemBuilder: (context, index) {
                       final file = _workspaceFiles[index];
+                      final isSelected = _selectedForTransfer.contains(file.path);
                       return ListTile(
+
                         dense: true,
                         leading: const Icon(Icons.description, size: 20),
                         title: Text(
@@ -605,15 +609,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
-                        trailing: IconButton(
-                          icon: const Icon(Icons.close, size: 18, color: Colors.red),
-                          onPressed: () => _removeWorkspaceFile(file.path),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.upload, size: 18, color: Colors.blue),
+                              tooltip: '上传到中转站',
+                              onPressed: () => _uploadToTransfer(file),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.close, size: 18, color: Colors.red),
+                              onPressed: () => _removeWorkspaceFile(file.path),
+                            ),
+                          ],
                         ),
                         onTap: () => _viewWorkspaceFile(file),
                       );
                     },
                   ),
                 ),
+
                 const Divider(height: 1),
                 // 底部统计和清空
                 Padding(
