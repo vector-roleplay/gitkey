@@ -1,8 +1,12 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:file_picker/file_picker.dart';
 import '../services/storage_service.dart';
 import '../services/github_service.dart';
 import '../models.dart';
+import '../main.dart';
+
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -19,11 +23,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String? _validateError;
   String? _tokenPreview;
   
+  // 工作区相关
+  List<WorkspaceFile> _workspaceFiles = [];
+  bool _workspaceMode = false;
+
+  
   @override
   void initState() {
     super.initState();
     _loadData();
+    _loadWorkspace();
   }
+  
+  void _loadWorkspace() {
+    final storage = context.read<StorageService>();
+    setState(() {
+      _workspaceFiles = storage.getWorkspaceFiles();
+      _workspaceMode = storage.getWorkspaceMode();
+    });
+  }
+
   
   Future<void> _loadData() async {
     final storage = context.read<StorageService>();
@@ -275,6 +294,116 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           
           _buildSection(
+            title: '本地工作区',
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  _workspaceMode ? '已启用' : '已禁用',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: _workspaceMode ? Colors.green : Colors.grey,
+                  ),
+                ),
+                Switch(
+                  value: _workspaceMode,
+                  onChanged: _toggleWorkspaceMode,
+                ),
+              ],
+            ),
+            children: [
+              // 操作按钮
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: _importLocalFiles,
+                        icon: const Icon(Icons.file_upload, size: 18),
+                        label: const Text('导入文件'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: _importFromGit,
+                        icon: const Icon(Icons.cloud_download, size: 18),
+                        label: const Text('从Git导入'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (_workspaceFiles.isNotEmpty) ...[
+                const Divider(height: 1),
+                // 文件列表
+                Container(
+                  constraints: const BoxConstraints(maxHeight: 300),
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: _workspaceFiles.length,
+                    itemBuilder: (context, index) {
+                      final file = _workspaceFiles[index];
+                      return ListTile(
+                        dense: true,
+                        leading: const Icon(Icons.description, size: 20),
+                        title: Text(
+                          file.fileName,
+                          style: const TextStyle(fontSize: 14),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        subtitle: Text(
+                          file.path,
+                          style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        trailing: IconButton(
+                          icon: const Icon(Icons.close, size: 18, color: Colors.red),
+                          onPressed: () => _removeWorkspaceFile(file.path),
+                        ),
+                        onTap: () => _viewWorkspaceFile(file),
+                      );
+                    },
+                  ),
+                ),
+                const Divider(height: 1),
+                // 底部统计和清空
+                Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    children: [
+                      Icon(Icons.folder, size: 16, color: Colors.grey[600]),
+                      const SizedBox(width: 8),
+                      Text(
+                        '共 ${_workspaceFiles.length} 个文件',
+                        style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                      ),
+                      const Spacer(),
+                      TextButton.icon(
+                        onPressed: _clearWorkspace,
+                        icon: const Icon(Icons.delete_sweep, size: 18, color: Colors.red),
+                        label: const Text('清空', style: TextStyle(color: Colors.red)),
+                      ),
+                    ],
+                  ),
+                ),
+              ] else
+                Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Center(
+                    child: Text(
+                      '暂无文件，点击上方按钮导入',
+                      style: TextStyle(color: Colors.grey[500]),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          
+          _buildSection(
             title: '关于',
             children: [
               const ListTile(
@@ -288,6 +417,241 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     );
   }
+  
+  Future<void> _toggleWorkspaceMode(bool enabled) async {
+    final storage = context.read<StorageService>();
+    final appState = context.read<AppState>();
+    await storage.setWorkspaceMode(enabled);
+    appState.setWorkspaceMode(enabled);
+    setState(() => _workspaceMode = enabled);
+  }
+  
+  Future<void> _importLocalFiles() async {
+    final result = await FilePicker.platform.pickFiles(
+      allowMultiple: true,
+      type: FileType.any,
+    );
+    
+    if (result == null || result.files.isEmpty) return;
+    
+    final storage = context.read<StorageService>();
+    final newFiles = <WorkspaceFile>[];
+    
+    for (final file in result.files) {
+      if (file.path == null) continue;
+      try {
+        final content = await File(file.path!).readAsString();
+        // 使用文件名作为路径，用户可以后续编辑
+        newFiles.add(WorkspaceFile(
+          path: file.name,
+          content: content,
+        ));
+      } catch (e) {
+        // 跳过无法读取的文件
+      }
+    }
+    
+    if (newFiles.isNotEmpty) {
+      await storage.addWorkspaceFiles(newFiles);
+      _loadWorkspace();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('已导入 ${newFiles.length} 个文件')),
+        );
+      }
+    }
+  }
+  
+  Future<void> _importFromGit() async {
+    if (_repos.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请先添加仓库')),
+      );
+      return;
+    }
+    
+    // 选择仓库
+    final selectedRepo = await showDialog<Repository>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: const Text('选择仓库'),
+        children: _repos.map((repo) => SimpleDialogOption(
+          onPressed: () => Navigator.pop(ctx, repo),
+          child: Text(repo.fullName),
+        )).toList(),
+      ),
+    );
+    
+    if (selectedRepo == null) return;
+    
+    // 输入文件路径
+    final pathController = TextEditingController();
+    final paths = await showDialog<List<String>>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('输入文件路径'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('每行一个路径，例如：\nlib/main.dart\nlib/models.dart', style: TextStyle(fontSize: 12)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: pathController,
+              maxLines: 5,
+              decoration: const InputDecoration(
+                hintText: 'lib/main.dart',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final lines = pathController.text
+                  .split('\n')
+                  .map((l) => l.trim())
+                  .where((l) => l.isNotEmpty)
+                  .toList();
+              Navigator.pop(ctx, lines);
+            },
+            child: const Text('导入'),
+          ),
+        ],
+      ),
+    );
+    
+    if (paths == null || paths.isEmpty) return;
+    
+    // 从 GitHub 下载文件
+    final github = context.read<GitHubService>();
+    final storage = context.read<StorageService>();
+    final newFiles = <WorkspaceFile>[];
+    int failCount = 0;
+    
+    // 显示加载指示
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => const Center(child: CircularProgressIndicator()),
+    );
+    
+    for (final path in paths) {
+      final result = await github.getFileContent(
+        owner: selectedRepo.owner,
+        repo: selectedRepo.name,
+        path: path,
+        branch: selectedRepo.branch,
+      );
+      
+      if (result.success && result.content != null) {
+        newFiles.add(WorkspaceFile(
+          path: path,
+          content: result.content!,
+        ));
+      } else {
+        failCount++;
+      }
+    }
+    
+    Navigator.pop(context); // 关闭加载指示
+    
+    if (newFiles.isNotEmpty) {
+      await storage.addWorkspaceFiles(newFiles);
+      _loadWorkspace();
+    }
+    
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('已导入 ${newFiles.length} 个文件${failCount > 0 ? '，$failCount 个失败' : ''}')),
+      );
+    }
+  }
+  
+  Future<void> _removeWorkspaceFile(String path) async {
+    final storage = context.read<StorageService>();
+    await storage.removeWorkspaceFile(path);
+    _loadWorkspace();
+  }
+  
+  Future<void> _clearWorkspace() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('清空工作区'),
+        content: const Text('确定要清空所有本地工作区文件吗？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('清空', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+    
+    if (confirm == true) {
+      final storage = context.read<StorageService>();
+      await storage.clearWorkspace();
+      _loadWorkspace();
+    }
+  }
+  
+  void _viewWorkspaceFile(WorkspaceFile file) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.7,
+        minChildSize: 0.3,
+        maxChildSize: 0.95,
+        expand: false,
+        builder: (ctx, scrollController) => Column(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(file.fileName, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                        Text(file.path, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.pop(ctx),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: SingleChildScrollView(
+                controller: scrollController,
+                padding: const EdgeInsets.all(16),
+                child: SelectableText(
+                  file.content,
+                  style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   
   Widget _buildSection({
     required String title,
