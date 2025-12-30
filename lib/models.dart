@@ -236,4 +236,43 @@ class FileChangeRecord {
     originalContent: json['originalContent'] as String?,
     modifiedContent: json['modifiedContent'] as String?,
   );
+}/// 本地工作区文件
+class WorkspaceFile {
+  final String path;
+  final String content;
+  final DateTime updatedAt;
+
+  WorkspaceFile({
+    required this.path,
+    required this.content,
+    DateTime? updatedAt,
+  }) : updatedAt = updatedAt ?? DateTime.now();
+
+  String get fileName => path.split('/').last;
+  
+  int get size => content.length;
+
+  WorkspaceFile copyWith({
+    String? path,
+    String? content,
+    DateTime? updatedAt,
+  }) {
+    return WorkspaceFile(
+      path: path ?? this.path,
+      content: content ?? this.content,
+      updatedAt: updatedAt ?? DateTime.now(),
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'path': path,
+    'content': content,
+    'updatedAt': updatedAt.toIso8601String(),
+  };
+
+  factory WorkspaceFile.fromJson(Map<String, dynamic> json) => WorkspaceFile(
+    path: json['path'] as String,
+    content: json['content'] as String,
+    updatedAt: DateTime.parse(json['updatedAt'] as String),
+  );
 }
