@@ -712,6 +712,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           
           _buildSection(
+            title: '应用更新',
+            children: [
+              ListTile(
+                leading: const Icon(Icons.build_circle, color: Colors.blue),
+                title: const Text('构建新版本'),
+                subtitle: const Text('触发 GitHub Actions 构建 APK'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.pushNamed(context, '/build'),
+              ),
+            ],
+          ),
+          
+          _buildSection(
             title: '关于',
             children: [
               const ListTile(
@@ -725,6 +738,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     );
   }
+
   
   Future<void> _toggleWorkspaceMode(bool enabled) async {
     final storage = context.read<StorageService>();
