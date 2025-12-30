@@ -111,15 +111,20 @@ class _ParserScreenState extends State<ParserScreen> {
     final github = context.read<GitHubService>();
     final storage = context.read<StorageService>();
     final merger = context.read<CodeMerger>();
-    final repo = appState.selectedRepo ?? storage.getDefaultRepository();
     
-    if (repo == null) {
+    // 检查是否使用本地工作区模式
+    final useWorkspace = storage.getWorkspaceMode();
+    
+    // 如果不是工作区模式，需要检查仓库
+    final repo = appState.selectedRepo ?? storage.getDefaultRepository();
+    if (!useWorkspace && repo == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('请先选择仓库')),
       );
       setState(() => _isProcessing = false);
       return;
     }
+
     
     final selectedInstructions = _selectedIndices.map((i) => _instructions[i]).toList();
     final byFile = <String, List<Instruction>>{};
@@ -140,21 +145,38 @@ class _ParserScreenState extends State<ParserScreen> {
       String? sha;
       
       if (needsDownload) {
-        final result = await github.getFileContent(
-          owner: repo.owner,
-          repo: repo.name,
-          path: filePath,
-          branch: repo.branch,
-        );
-        if (result.success && !result.notFound) {
-          originalContent = result.content;
-          sha = result.sha;
-        } else if (result.notFound) {
-          if (instructions.any((i) => i.type == OperationType.deleteFile)) {
-            continue;
+        if (useWorkspace) {
+          // 从本地工作区获取文件
+          final workspaceFile = storage.getWorkspaceFile(filePath);
+          if (workspaceFile != null) {
+            originalContent = workspaceFile.content;
+            // 工作区文件没有 sha
+          } else {
+            // 工作区中没有该文件
+            if (instructions.any((i) => i.type == OperationType.deleteFile)) {
+              continue; // 跳过删除不存在的文件
+            }
+            // 其他操作会创建新文件
+          }
+        } else {
+          // 从 GitHub 下载
+          final result = await github.getFileContent(
+            owner: repo!.owner,
+            repo: repo.name,
+            path: filePath,
+            branch: repo.branch,
+          );
+          if (result.success && !result.notFound) {
+            originalContent = result.content;
+            sha = result.sha;
+          } else if (result.notFound) {
+            if (instructions.any((i) => i.type == OperationType.deleteFile)) {
+              continue;
+            }
           }
         }
       }
+
       
       String? modifiedContent = originalContent;
       bool hasError = false;
