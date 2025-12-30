@@ -59,23 +59,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   /// 上传单个文件到中转站
   Future<void> _uploadToTransfer(WorkspaceFile file) async {
-    final success = await TransferService.instance.uploadFile(
+    final result = await TransferService.instance.uploadFile(
       TransferFile(path: file.path, content: file.content),
     );
     
     if (mounted) {
-      if (success) {
+      if (result.success) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('已上传: ${file.fileName}')),
         );
         _loadTransferCount();
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('上传失败')),
-        );
+        _handleUploadError(result.error);
       }
     }
   }
+
 
   /// 批量上传到中转站
   Future<void> _uploadSelectedToTransfer() async {
@@ -91,10 +90,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
         .map((f) => TransferFile(path: f.path, content: f.content))
         .toList();
 
-    final success = await TransferService.instance.uploadFiles(filesToUpload);
+    final result = await TransferService.instance.uploadFiles(filesToUpload);
     
     if (mounted) {
-      if (success) {
+      if (result.success) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('已上传 ${filesToUpload.length} 个文件到中转站')),
         );
@@ -103,14 +102,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
         });
         _loadTransferCount();
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('上传失败')),
-        );
+        _handleUploadError(result.error);
       }
     }
   }
 
   /// 上传全部工作区文件到中转站
+
   Future<void> _uploadAllToTransfer() async {
     if (_workspaceFiles.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -143,23 +141,73 @@ class _SettingsScreenState extends State<SettingsScreen> {
         .map((f) => TransferFile(path: f.path, content: f.content))
         .toList();
 
-    final success = await TransferService.instance.uploadFiles(filesToUpload);
+    final result = await TransferService.instance.uploadFiles(filesToUpload);
     
     if (mounted) {
-      if (success) {
+      if (result.success) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('已上传 ${filesToUpload.length} 个文件到中转站')),
         );
         _loadTransferCount();
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('上传失败')),
-        );
+        _handleUploadError(result.error);
       }
     }
   }
 
+  /// 处理上传错误（显示权限引导对话框）
+  void _handleUploadError(String? error) {
+    if (error != null && error.contains('权限')) {
+      // 显示权限引导对话框
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.folder_off, color: Colors.orange),
+              SizedBox(width: 8),
+              Text('需要存储权限'),
+            ],
+          ),
+          content: const Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('中转站功能需要"所有文件访问权限"才能在公共目录存储文件。'),
+              SizedBox(height: 12),
+              Text('请按以下步骤操作：', style: TextStyle(fontWeight: FontWeight.bold)),
+              SizedBox(height: 8),
+              Text('1. 点击"去设置"按钮'),
+              Text('2. 找到"所有文件访问权限"或"文件和媒体"'),
+              Text('3. 开启权限'),
+              Text('4. 返回应用重试'),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('取消'),
+            ),
+            FilledButton.icon(
+              onPressed: () async {
+                Navigator.pop(ctx);
+                await TransferService.instance.openSettings();
+              },
+              icon: const Icon(Icons.settings),
+              label: const Text('去设置'),
+            ),
+          ],
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('上传失败: ${error ?? "未知错误"}')),
+      );
+    }
+  }
+
   /// 查看中转站内容
+
   Future<void> _viewTransferStation() async {
     final files = await TransferService.instance.getFiles();
     
