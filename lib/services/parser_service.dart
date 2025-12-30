@@ -153,8 +153,43 @@ class ParseResult {
 
 /// 代码合并器
 class CodeMerger {
+  
+  /// 生成骨架和位置映射
+  /// 返回 (骨架字符串, 骨架索引 -> 原始索引的映射)
+  _SkeletonResult _buildSkeleton(String text) {
+    final skeleton = StringBuffer();
+    final positionMap = <int>[]; // positionMap[骨架索引] = 原始索引
+    
+    for (int i = 0; i < text.length; i++) {
+      final char = text[i];
+      if (!_isWhitespace(char)) {
+        positionMap.add(i);
+        skeleton.write(char);
+      }
+    }
+    
+    return _SkeletonResult(skeleton.toString(), positionMap);
+  }
+  
+  /// 判断是否为空白字符（包括各种特殊空白）
+  bool _isWhitespace(String char) {
+    if (char.isEmpty) return false;
+    final code = char.codeUnitAt(0);
+    return code == 0x20    // 空格
+        || code == 0x09    // Tab
+        || code == 0x0A    // LF (\n)
+        || code == 0x0D    // CR (\r)
+        || code == 0x0C    // Form Feed
+        || code == 0x0B    // Vertical Tab
+        || code == 0xA0    // 不换行空格 (NBSP)
+        || code == 0x3000  // 全角空格
+        || code == 0xFEFF  // BOM / 零宽不换行空格
+        || (code >= 0x2000 && code <= 0x200B); // 各种Unicode空白
+  }
+  
   /// 执行指令，返回合并结果
   MergeResult execute(Instruction instruction, String? originalContent) {
+
     switch (instruction.type) {
       case OperationType.create:
       case OperationType.replace:
@@ -180,75 +215,72 @@ class CodeMerger {
     }
   }
   
-  /// 规范化文本：去掉每行首尾空格，统一换行符
-  String _normalize(String text) {
-    return text
-        .replaceAll('\r\n', '\n')
-        .replaceAll('\r', '\n')
-        .split('\n')
-        .map((line) => line.trim())
-        .join('\n')
-        .trim();
-  }
-  
-  /// 在原始内容中查找锚点位置（支持规范化匹配）
+  /// 在原始内容中查找锚点位置（骨架匹配法）
   AnchorMatch? _findAnchor(String content, String anchor) {
-    // 先尝试精确匹配
-    int index = content.indexOf(anchor);
-    if (index != -1) {
+    if (anchor.isEmpty) return null;
+    
+    // 1. 先尝试精确匹配（最快）
+    int exactIndex = content.indexOf(anchor);
+    if (exactIndex != -1) {
       int count = anchor.allMatches(content).length;
       return AnchorMatch(
-        start: index,
-        end: index + anchor.length,
+        start: exactIndex,
+        end: exactIndex + anchor.length,
         matchedText: anchor,
         occurrences: count,
         isExactMatch: true,
       );
     }
     
-    // 规范化匹配：逐行比较（忽略首尾空格）
-    final anchorLines = anchor.split('\n').map((l) => l.trim()).where((l) => l.isNotEmpty).toList();
-    if (anchorLines.isEmpty) return null;
+    // 2. 骨架匹配法
+    final contentSkeleton = _buildSkeleton(content);
+    final anchorSkeleton = _buildSkeleton(anchor);
     
-    final contentLines = content.split('\n');
+    if (anchorSkeleton.skeleton.isEmpty) return null;
     
-    List<int> matchPositions = [];
-    
-    for (int i = 0; i <= contentLines.length - anchorLines.length; i++) {
-      bool match = true;
-      for (int j = 0; j < anchorLines.length; j++) {
-        if (contentLines[i + j].trim() != anchorLines[j]) {
-          match = false;
-          break;
-        }
-      }
-      if (match) {
-        matchPositions.add(i);
-      }
+    // 在内容骨架中查找锚点骨架的所有出现位置
+    final matches = <int>[];
+    int searchStart = 0;
+    while (true) {
+      int index = contentSkeleton.skeleton.indexOf(anchorSkeleton.skeleton, searchStart);
+      if (index == -1) break;
+      matches.add(index);
+      searchStart = index + 1;
     }
     
-    if (matchPositions.isEmpty) return null;
+    if (matches.isEmpty) return null;
     
-    // 计算第一个匹配的位置
-    int lineIndex = matchPositions.first;
-    int start = 0;
-    for (int k = 0; k < lineIndex; k++) {
-      start += contentLines[k].length + 1;
+    // 使用第一个匹配，计算原始位置
+    int skeletonStart = matches.first;
+    int skeletonEnd = skeletonStart + anchorSkeleton.skeleton.length;
+    
+    // 骨架位置 -> 原始位置
+    int originalStart = contentSkeleton.positionMap[skeletonStart];
+    // 骨架结束位置对应的原始位置（需要包含最后一个字符之后的内容直到下一个非空白或结尾）
+    int originalEnd;
+    if (skeletonEnd >= contentSkeleton.positionMap.length) {
+      originalEnd = content.length;
+    } else {
+      originalEnd = contentSkeleton.positionMap[skeletonEnd];
     }
-    int end = start;
-    for (int k = 0; k < anchorLines.length; k++) {
-      end += contentLines[lineIndex + k].length + 1;
+    
+    // 向前扩展 originalStart，包含前面的空白（直到行首或上一个非空白字符）
+    while (originalStart > 0 && _isWhitespace(content[originalStart - 1]) && content[originalStart - 1] != '\n') {
+      originalStart--;
     }
-    if (end > 0) end--;
+    
+    // 提取匹配的原始文本
+    String matchedText = content.substring(originalStart, originalEnd);
     
     return AnchorMatch(
-      start: start,
-      end: end,
-      matchedText: contentLines.sublist(lineIndex, lineIndex + anchorLines.length).join('\n'),
-      occurrences: matchPositions.length,
+      start: originalStart,
+      end: originalEnd,
+      matchedText: matchedText,
+      occurrences: matches.length,
       isExactMatch: false,
     );
   }
+
   
   MergeResult _findAndReplace(String? originalContent, Instruction instruction) {
     if (originalContent == null || originalContent.isEmpty) {
@@ -412,6 +444,15 @@ class AnchorMatch {
     required this.isExactMatch,
   });
 }
+
+/// 骨架构建结果
+class _SkeletonResult {
+  final String skeleton;
+  final List<int> positionMap; // positionMap[骨架索引] = 原始索引
+  
+  _SkeletonResult(this.skeleton, this.positionMap);
+}
+
 
 class MergeResult {
   final bool success;
