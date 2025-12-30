@@ -18,8 +18,11 @@ dependencies:
   file_picker: any
   path_provider: any
   permission_handler: any
+  archive: any
+  open_filex: any
 
 dev_dependencies:
+
 
 
   flutter_test:
