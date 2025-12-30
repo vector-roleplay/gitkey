@@ -86,8 +86,11 @@ jobs:
             file_picker: any
             path_provider: any
             permission_handler: any
+            archive: any
+            open_filex: any
           
           dev_dependencies:
+
             flutter_test:
               sdk: flutter
             flutter_lints: any
@@ -104,7 +107,10 @@ jobs:
           sed -i '/<uses-permission android:name="android.permission.INTERNET"/a\    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>' android/app/src/main/AndroidManifest.xml
           sed -i '/<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/a\    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>' android/app/src/main/AndroidManifest.xml
           sed -i '/<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/a\    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"/>' android/app/src/main/AndroidManifest.xml
+          # 添加安装 APK 权限
+          sed -i '/<uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"/a\    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>' android/app/src/main/AndroidManifest.xml
           # 添加 requestLegacyExternalStorage 用于 Android 10 兼容
+
           sed -i 's/<application/<application android:requestLegacyExternalStorage="true"/' android/app/src/main/AndroidManifest.xml
       
       - name: Setup Keystore
