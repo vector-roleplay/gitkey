@@ -38,12 +38,24 @@ class _HomeScreenState extends State<HomeScreen> {
     final appState = context.read<AppState>();
     final github = context.read<GitHubService>();
     final storage = context.read<StorageService>();
-    final repo = appState.selectedRepo;
-    
-    if (repo == null) return;
     
     final changes = appState.getSelectedChanges();
     if (changes.isEmpty) return;
+    
+    // 如果目标是本地工作区
+    if (appState.targetIsWorkspace) {
+      await _pushToWorkspace(changes, storage, appState);
+      return;
+    }
+    
+    final repo = appState.selectedRepo;
+    if (repo == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请先选择仓库')),
+      );
+      return;
+    }
+
     
     setState(() => _isPushing = true);
     
@@ -157,29 +169,54 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       body: Column(
         children: [
-          // 仓库选择
+          // 推送目标选择
           Padding(
             padding: const EdgeInsets.all(16),
             child: DropdownButtonFormField<String>(
               decoration: const InputDecoration(
-                labelText: '选择仓库',
+                labelText: '推送目标',
                 border: OutlineInputBorder(),
-                prefixIcon: Icon(Icons.folder),
+                prefixIcon: Icon(Icons.cloud_upload),
               ),
-              value: appState.selectedRepo?.fullName,
-              items: _repos.map((r) => DropdownMenuItem(
-                value: r.fullName,
-                child: Text(r.fullName),
-              )).toList(),
+              value: appState.targetIsWorkspace ? '_workspace_' : appState.selectedRepo?.fullName,
+              items: [
+                // 本地工作区选项
+                const DropdownMenuItem(
+                  value: '_workspace_',
+                  child: Row(
+                    children: [
+                      Icon(Icons.phone_android, size: 20),
+                      SizedBox(width: 8),
+                      Text('本地工作区'),
+                    ],
+                  ),
+                ),
+                // 分隔线
+                const DropdownMenuItem(
+                  enabled: false,
+                  value: '_divider_',
+                  child: Divider(),
+                ),
+                // 仓库列表
+                ..._repos.map((r) => DropdownMenuItem(
+                  value: r.fullName,
+                  child: Text(r.fullName),
+                )),
+              ],
               onChanged: (value) {
-                if (value != null) {
+                if (value == '_divider_') return;
+                if (value == '_workspace_') {
+                  appState.setTargetIsWorkspace(true);
+                } else if (value != null) {
+                  appState.setTargetIsWorkspace(false);
                   final repo = _repos.firstWhere((r) => r.fullName == value);
                   appState.setSelectedRepo(repo);
                 }
               },
-              hint: const Text('请选择仓库'),
+              hint: const Text('请选择推送目标'),
             ),
           ),
+
           
           // 内容区域
           Expanded(
