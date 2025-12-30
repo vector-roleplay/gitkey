@@ -17,9 +17,10 @@ dependencies:
   cupertino_icons: any
   file_picker: any
   path_provider: any
-
+  permission_handler: any
 
 dev_dependencies:
+
 
   flutter_test:
     sdk: flutter
