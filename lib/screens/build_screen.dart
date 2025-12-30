@@ -32,16 +32,26 @@ class _BuildScreenState extends State<BuildScreen> {
   double _downloadProgress = 0;
   
   Timer? _pollTimer;
+  
+  // 计时相关
+  DateTime? _startTime;
+  Timer? _tickTimer;
+  String _elapsedTime = '';
 
   @override
   void initState() {
     super.initState();
     _loadRepos();
+    // 延迟检查，确保 context 可用
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkExistingBuild();
+    });
   }
 
   @override
   void dispose() {
     _pollTimer?.cancel();
+    _tickTimer?.cancel();
     super.dispose();
   }
 
@@ -51,6 +61,65 @@ class _BuildScreenState extends State<BuildScreen> {
       _repos = storage.getRepositories();
       _selectedRepo = storage.getDefaultRepository();
     });
+  }
+
+  /// 检查是否有正在进行的构建
+  Future<void> _checkExistingBuild() async {
+    if (_selectedRepo == null) return;
+    
+    final github = context.read<GitHubService>();
+    final result = await github.getLatestWorkflowRun(
+      owner: _selectedRepo!.owner,
+      repo: _selectedRepo!.name,
+      workflowId: 'android.yml',
+    );
+
+    if (result.run != null && result.run!.isRunning) {
+      // 有正在进行的构建，恢复状态
+      setState(() {
+        _currentRun = result.run;
+        _statusMessage = _getStatusMessage(result.run!);
+        // 从 GitHub 的 created_at 解析开始时间
+        _startTime = DateTime.tryParse(result.run!.createdAt);
+      });
+      _startPolling();
+    }
+  }
+
+  /// 格式化已用时间
+  String _formatDuration(Duration duration) {
+    final minutes = duration.inMinutes;
+    final seconds = duration.inSeconds % 60;
+    if (minutes > 0) {
+      return '$minutes分${seconds}秒';
+    } else {
+      return '$seconds秒';
+    }
+  }
+
+  /// 更新已用时间显示
+  void _updateElapsedTime() {
+    if (_startTime != null) {
+      final elapsed = DateTime.now().difference(_startTime!);
+      setState(() {
+        _elapsedTime = _formatDuration(elapsed);
+      });
+    }
+  }
+
+  /// 开始计时
+  void _startTicking() {
+    _tickTimer?.cancel();
+    _updateElapsedTime(); // 立即更新一次
+    _tickTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      _updateElapsedTime();
+    });
+  }
+
+  /// 停止计时
+  void _stopTicking() {
+    _tickTimer?.cancel();
+    _tickTimer = null;
   }
 
   /// 触发构建
@@ -65,6 +134,8 @@ class _BuildScreenState extends State<BuildScreen> {
       _errorMessage = null;
       _statusMessage = '正在触发构建...';
       _currentRun = null;
+      _startTime = null;
+      _elapsedTime = '';
     });
 
     final github = context.read<GitHubService>();
@@ -80,7 +151,9 @@ class _BuildScreenState extends State<BuildScreen> {
       setState(() {
         _isTriggering = false;
         _statusMessage = '构建已触发，等待开始...';
+        _startTime = DateTime.now(); // 记录开始时间
       });
+      _startTicking(); // 开始计时
       // 等待一下再开始轮询
       await Future.delayed(const Duration(seconds: 3));
       _startPolling();
@@ -96,6 +169,11 @@ class _BuildScreenState extends State<BuildScreen> {
   /// 开始轮询构建状态
   void _startPolling() {
     setState(() => _isPolling = true);
+    
+    // 确保计时器在运行
+    if (_tickTimer == null && _startTime != null) {
+      _startTicking();
+    }
     
     _pollTimer = Timer.periodic(const Duration(seconds: 5), (timer) async {
       await _checkBuildStatus();
@@ -116,6 +194,14 @@ class _BuildScreenState extends State<BuildScreen> {
     );
 
     if (result.run != null) {
+      // 如果还没有开始时间，从 API 获取
+      if (_startTime == null) {
+        _startTime = DateTime.tryParse(result.run!.createdAt);
+        if (_startTime != null) {
+          _startTicking();
+        }
+      }
+
       setState(() {
         _currentRun = result.run;
         _statusMessage = _getStatusMessage(result.run!);
@@ -123,10 +209,11 @@ class _BuildScreenState extends State<BuildScreen> {
 
       if (result.run!.isCompleted) {
         _pollTimer?.cancel();
+        _stopTicking(); // 停止计时
         setState(() => _isPolling = false);
         
         if (result.run!.isSuccess) {
-          setState(() => _statusMessage = '✅ 构建成功！可以下载了');
+          setState(() => _statusMessage = '✅ 构建成功！');
         } else {
           setState(() {
             _statusMessage = null;
@@ -267,9 +354,12 @@ class _BuildScreenState extends State<BuildScreen> {
   /// 停止轮询
   void _stopPolling() {
     _pollTimer?.cancel();
+    _stopTicking();
     setState(() {
       _isPolling = false;
       _statusMessage = null;
+      _startTime = null;
+      _elapsedTime = '';
     });
   }
 
@@ -306,6 +396,8 @@ class _BuildScreenState extends State<BuildScreen> {
                         setState(() {
                           _selectedRepo = _repos.firstWhere((r) => r.fullName == value);
                         });
+                        // 切换仓库时检查该仓库是否有进行中的构建
+                        _checkExistingBuild();
                       }
                     },
                     hint: const Text('请选择仓库'),
@@ -380,9 +472,26 @@ class _BuildScreenState extends State<BuildScreen> {
                           ),
                         if (_isPolling || _isDownloading) const SizedBox(width: 12),
                         Expanded(
-                          child: Text(
-                            _statusMessage ?? '',
-                            style: const TextStyle(fontSize: 16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                _statusMessage ?? '',
+                                style: const TextStyle(fontSize: 16),
+                              ),
+                              // 显示已用时间
+                              if (_elapsedTime.isNotEmpty && (_isPolling || _currentRun?.isSuccess == true))
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 4),
+                                  child: Text(
+                                    '已用时: $_elapsedTime',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      color: Colors.grey[600],
+                                    ),
+                                  ),
+                                ),
+                            ],
                           ),
                         ),
                         if (_isPolling)
@@ -461,6 +570,7 @@ class _BuildScreenState extends State<BuildScreen> {
                   const Text('2. 首次构建可能需要 8-10 分钟'),
                   const Text('3. 下载速度取决于网络环境'),
                   const Text('4. 安装时需要允许"未知来源"权限'),
+                  const Text('5. 离开页面后返回会自动恢复构建状态'),
                 ],
               ),
             ),
