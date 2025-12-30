@@ -94,15 +94,29 @@ class MyApp extends StatelessWidget {
 class AppState extends ChangeNotifier {
   Repository? _selectedRepo;
   final Map<String, FileChange> _fileChanges = {};
+  bool _useWorkspaceMode = false;  // 是否使用本地工作区模式
+  bool _targetIsWorkspace = false; // 推送目标是否为工作区
   
   Repository? get selectedRepo => _selectedRepo;
+  bool get useWorkspaceMode => _useWorkspaceMode;
+  bool get targetIsWorkspace => _targetIsWorkspace;
+
   List<FileChange> get fileChanges => _fileChanges.values.toList();
   int get selectedCount => _fileChanges.values.where((f) => f.isSelected).length;
   
   void setSelectedRepo(Repository? repo) {
     _selectedRepo = repo;
     notifyListeners();
+  }void setWorkspaceMode(bool enabled) {
+    _useWorkspaceMode = enabled;
+    notifyListeners();
   }
+  
+  void setTargetIsWorkspace(bool isWorkspace) {
+    _targetIsWorkspace = isWorkspace;
+    notifyListeners();
+  }
+
   
   void addFileChanges(List<FileChange> changes) {
     for (final change in changes) {
