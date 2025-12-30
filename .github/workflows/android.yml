@@ -75,11 +75,19 @@ jobs:
             uses-material-design: true
           EOF
           
-      - name: Add Internet permission
+      - name: Add permissions
         run: |
+          # 添加网络权限
           sed -i '/<manifest xmlns/a\    <uses-permission android:name="android.permission.INTERNET"/>' android/app/src/main/AndroidManifest.xml
+          # 添加存储权限（用于中转站功能）
+          sed -i '/<uses-permission android:name="android.permission.INTERNET"/a\    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>' android/app/src/main/AndroidManifest.xml
+          sed -i '/<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/a\    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>' android/app/src/main/AndroidManifest.xml
+          sed -i '/<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/a\    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"/>' android/app/src/main/AndroidManifest.xml
+          # 添加 requestLegacyExternalStorage 用于 Android 10 兼容
+          sed -i 's/<application/<application android:requestLegacyExternalStorage="true"/' android/app/src/main/AndroidManifest.xml
       
       - name: Setup Keystore
+
         run: |
           if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
             echo "使用已保存的密钥"
