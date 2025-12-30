@@ -9,6 +9,8 @@ import 'screens/parser_screen.dart';
 import 'screens/editor_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/history_screen.dart';
+import 'screens/build_screen.dart';
+
 import 'models.dart';
 
 void main() async {
@@ -81,8 +83,10 @@ class MyApp extends StatelessWidget {
         '/parser': (context) => const ParserScreen(),
         '/settings': (context) => const SettingsScreen(),
         '/history': (context) => const HistoryScreen(),
+        '/build': (context) => const BuildScreen(),
       },
-      onGenerateRoute: (settings) {
+      onGenerateRoute:
+ (settings) {
         if (settings.name == '/editor') {
           final filePath = settings.arguments as String;
           return MaterialPageRoute(
