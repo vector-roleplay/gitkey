@@ -4,11 +4,12 @@ import 'package:provider/provider.dart';
 import 'package:file_picker/file_picker.dart';
 import '../services/storage_service.dart';
 import '../services/github_service.dart';
+import '../services/transfer_service.dart';
 import '../models.dart';
 import '../main.dart';
 
 
-class SettingsScreen extends StatefulWidget {
+
   const SettingsScreen({super.key});
 
   @override
@@ -26,10 +27,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
   // 工作区相关
   List<WorkspaceFile> _workspaceFiles = [];
   bool _workspaceMode = false;
-
   
+  // 中转站相关
+  int _transferFileCount = 0;
+  Set<String> _selectedForTransfer = {};
+
   @override
   void initState() {
+
     super.initState();
     _loadData();
     _loadWorkspace();
@@ -41,10 +46,217 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _workspaceFiles = storage.getWorkspaceFiles();
       _workspaceMode = storage.getWorkspaceMode();
     });
+    _loadTransferCount();
   }
 
-  
+  Future<void> _loadTransferCount() async {
+    final count = await TransferService.instance.getFileCount();
+    setState(() {
+      _transferFileCount = count;
+    });
+  }
+
+  /// 上传单个文件到中转站
+  Future<void> _uploadToTransfer(WorkspaceFile file) async {
+    final success = await TransferService.instance.uploadFile(
+      TransferFile(path: file.path, content: file.content),
+    );
+    
+    if (mounted) {
+      if (success) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('已上传: ${file.fileName}')),
+        );
+        _loadTransferCount();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('上传失败')),
+        );
+      }
+    }
+  }
+
+  /// 批量上传到中转站
+  Future<void> _uploadSelectedToTransfer() async {
+    if (_selectedForTransfer.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请先选择文件')),
+      );
+      return;
+    }
+
+    final filesToUpload = _workspaceFiles
+        .where((f) => _selectedForTransfer.contains(f.path))
+        .map((f) => TransferFile(path: f.path, content: f.content))
+        .toList();
+
+    final success = await TransferService.instance.uploadFiles(filesToUpload);
+    
+    if (mounted) {
+      if (success) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('已上传 ${filesToUpload.length} 个文件到中转站')),
+        );
+        setState(() {
+          _selectedForTransfer.clear();
+        });
+        _loadTransferCount();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('上传失败')),
+        );
+      }
+    }
+  }
+
+  /// 上传全部工作区文件到中转站
+  Future<void> _uploadAllToTransfer() async {
+    if (_workspaceFiles.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('工作区没有文件')),
+      );
+      return;
+    }
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('上传全部文件'),
+        content: Text('确定要上传全部 ${_workspaceFiles.length} 个文件到中转站吗？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('上传'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    final filesToUpload = _workspaceFiles
+        .map((f) => TransferFile(path: f.path, content: f.content))
+        .toList();
+
+    final success = await TransferService.instance.uploadFiles(filesToUpload);
+    
+    if (mounted) {
+      if (success) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('已上传 ${filesToUpload.length} 个文件到中转站')),
+        );
+        _loadTransferCount();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('上传失败')),
+        );
+      }
+    }
+  }
+
+  /// 查看中转站内容
+  Future<void> _viewTransferStation() async {
+    final files = await TransferService.instance.getFiles();
+    
+    if (!mounted) return;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.6,
+        minChildSize: 0.3,
+        maxChildSize: 0.9,
+        expand: false,
+        builder: (ctx, scrollController) => Column(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  const Icon(Icons.swap_horiz, color: Colors.blue),
+                  const SizedBox(width: 8),
+                  Text(
+                    '中转站 (${files.length}个文件)',
+                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                  const Spacer(),
+                  if (files.isNotEmpty)
+                    TextButton.icon(
+                      onPressed: () async {
+                        Navigator.pop(ctx);
+                        await TransferService.instance.clear();
+                        _loadTransferCount();
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('中转站已清空')),
+                          );
+                        }
+                      },
+                      icon: const Icon(Icons.delete_sweep, size: 18, color: Colors.red),
+                      label: const Text('清空', style: TextStyle(color: Colors.red)),
+                    ),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.pop(ctx),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            if (files.isEmpty)
+              const Expanded(
+                child: Center(
+                  child: Text('中转站是空的', style: TextStyle(color: Colors.grey)),
+                ),
+              )
+            else
+              Expanded(
+                child: ListView.builder(
+                  controller: scrollController,
+                  itemCount: files.length,
+                  itemBuilder: (ctx, index) {
+                    final file = files[index];
+                    return ListTile(
+                      dense: true,
+                      leading: const Icon(Icons.description, size: 20),
+                      title: Text(
+                        file.fileName,
+                        style: const TextStyle(fontSize: 14),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      subtitle: Text(
+                        file.path,
+                        style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.delete, size: 18, color: Colors.red),
+                        onPressed: () async {
+                          await TransferService.instance.removeFile(file.path);
+                          Navigator.pop(ctx);
+                          _viewTransferStation(); // 重新打开
+                          _loadTransferCount();
+                        },
+                      ),
+                    );
+                  },
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _loadData() async {
+
     final storage = context.read<StorageService>();
     final github = context.read<GitHubService>();
     
@@ -315,29 +527,62 @@ class _SettingsScreenState extends State<SettingsScreen> {
               // 操作按钮
               Padding(
                 padding: const EdgeInsets.all(12),
-                child: Row(
+                child: Column(
                   children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: _importLocalFiles,
-                        icon: const Icon(Icons.file_upload, size: 18),
-                        label: const Text('导入文件'),
-                      ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: _importLocalFiles,
+                            icon: const Icon(Icons.file_upload, size: 18),
+                            label: const Text('导入文件'),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: _importFromGit,
+                            icon: const Icon(Icons.cloud_download, size: 18),
+                            label: const Text('从Git导入'),
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: _importFromGit,
-                        icon: const Icon(Icons.cloud_download, size: 18),
-                        label: const Text('从Git导入'),
-                      ),
+                    const SizedBox(height: 8),
+                    // 中转站按钮行
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: _viewTransferStation,
+                            icon: Badge(
+                              isLabelVisible: _transferFileCount > 0,
+                              label: Text('$_transferFileCount'),
+                              child: const Icon(Icons.swap_horiz, size: 18),
+                            ),
+                            label: const Text('查看中转站'),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.blue,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: FilledButton.icon(
+                            onPressed: _workspaceFiles.isEmpty ? null : _uploadAllToTransfer,
+                            icon: const Icon(Icons.upload, size: 18),
+                            label: const Text('全部上传'),
+                            style: FilledButton.styleFrom(
+                              backgroundColor: Colors.blue,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
               ),
-              if (_workspaceFiles.isNotEmpty) ...[
-                const Divider(height: 1),
-                // 文件列表
+
                 Container(
                   constraints: const BoxConstraints(maxHeight: 300),
                   child: ListView.builder(
