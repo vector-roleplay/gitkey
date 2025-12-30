@@ -400,7 +400,3 @@ extension GitHubActionsService on GitHubService {
   }
 }
 
-  }
-}
-);
-}
