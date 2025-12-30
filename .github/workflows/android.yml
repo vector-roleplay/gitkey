@@ -61,6 +61,8 @@ jobs:
             shared_preferences: any
             provider: any
             cupertino_icons: any
+            file_picker: any
+
           
           dev_dependencies:
             flutter_test:
