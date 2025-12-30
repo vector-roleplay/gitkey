@@ -2,12 +2,13 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models.dart';
 
-
 class StorageService {
   static const _tokenKey = 'github_token';
   static const _reposKey = 'repositories';
   static const _historyKey = 'operation_history';
   static const _settingsKey = 'settings';
+  static const _workspaceKey = 'workspace_files';
+  static const _workspaceModeKey = 'workspace_mode';
   
   late SharedPreferences _prefs;
   
@@ -43,7 +44,6 @@ class StorageService {
   
   Future<void> addRepository(Repository repo) async {
     final repos = getRepositories();
-    // 如果是第一个，设为默认
     if (repos.isEmpty) {
       repos.add(Repository(
         owner: repo.owner,
@@ -94,16 +94,13 @@ class StorageService {
       final list = jsonDecode(json) as List;
       return list.map((e) => OperationHistory.fromJson(e)).toList();
     } catch (e) {
-      // 解析失败时返回空列表，避免崩溃
       return [];
     }
   }
-
   
   Future<void> addHistory(OperationHistory history) async {
     final list = getHistory();
     list.insert(0, history);
-    // 只保留最近50条
     if (list.length > 50) {
       list.removeRange(50, list.length);
     }
@@ -132,22 +129,17 @@ class StorageService {
   Future<void> saveSettings(Map<String, dynamic> settings) async {
     await _prefs.setString(_settingsKey, jsonEncode(settings));
   }
-}// ========== 本地工作区 ==========
   
-  static const _workspaceKey = 'workspace_files';
-  static const _workspaceModeKey = 'workspace_mode';
+  // ========== 本地工作区 ==========
   
-  /// 获取工作区模式开关状态
   bool getWorkspaceMode() {
     return _prefs.getBool(_workspaceModeKey) ?? false;
   }
   
-  /// 设置工作区模式开关
   Future<void> setWorkspaceMode(bool enabled) async {
     await _prefs.setBool(_workspaceModeKey, enabled);
   }
   
-  /// 获取所有工作区文件
   List<WorkspaceFile> getWorkspaceFiles() {
     try {
       final json = _prefs.getString(_workspaceKey);
@@ -159,13 +151,11 @@ class StorageService {
     }
   }
   
-  /// 保存工作区文件列表
   Future<void> _saveWorkspaceFiles(List<WorkspaceFile> files) async {
     final json = jsonEncode(files.map((e) => e.toJson()).toList());
     await _prefs.setString(_workspaceKey, json);
   }
   
-  /// 添加或更新工作区文件
   Future<void> addOrUpdateWorkspaceFile(WorkspaceFile file) async {
     final files = getWorkspaceFiles();
     final index = files.indexWhere((f) => f.path == file.path);
@@ -177,7 +167,6 @@ class StorageService {
     await _saveWorkspaceFiles(files);
   }
   
-  /// 批量添加工作区文件
   Future<void> addWorkspaceFiles(List<WorkspaceFile> newFiles) async {
     final files = getWorkspaceFiles();
     for (final newFile in newFiles) {
@@ -191,7 +180,6 @@ class StorageService {
     await _saveWorkspaceFiles(files);
   }
   
-  /// 获取单个工作区文件
   WorkspaceFile? getWorkspaceFile(String path) {
     final files = getWorkspaceFiles();
     try {
@@ -201,15 +189,13 @@ class StorageService {
     }
   }
   
-  /// 删除工作区文件
   Future<void> removeWorkspaceFile(String path) async {
     final files = getWorkspaceFiles();
     files.removeWhere((f) => f.path == path);
     await _saveWorkspaceFiles(files);
   }
   
-  /// 清空工作区
   Future<void> clearWorkspace() async {
     await _prefs.remove(_workspaceKey);
   }
-
+}
