@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 /// 中转站文件数据
 class TransferFile {
@@ -29,18 +30,92 @@ class TransferFile {
   );
 }
 
+/// 权限检查结果
+class PermissionResult {
+  final bool granted;
+  final bool permanentlyDenied;
+  final String? message;
+
+  PermissionResult({
+    required this.granted,
+    this.permanentlyDenied = false,
+    this.message,
+  });
+}
+
 /// 中转站服务 - 用于两个应用之间共享文件
 class TransferService {
   static final TransferService instance = TransferService._internal();
   TransferService._internal();
 
+  /// 检查并请求存储权限
+  Future<PermissionResult> checkAndRequestPermission() async {
+    if (!Platform.isAndroid) {
+      return PermissionResult(granted: true);
+    }
+
+    // Android 11+ (API 30+) 需要 MANAGE_EXTERNAL_STORAGE
+    if (await _isAndroid11OrHigher()) {
+      final status = await Permission.manageExternalStorage.status;
+      
+      if (status.isGranted) {
+        return PermissionResult(granted: true);
+      }
+      
+      if (status.isPermanentlyDenied || status.isDenied) {
+        // 需要引导用户去设置页面开启
+        return PermissionResult(
+          granted: false,
+          permanentlyDenied: true,
+          message: '需要"所有文件访问权限"才能使用中转站功能',
+        );
+      }
+      
+      // 请求权限
+      final result = await Permission.manageExternalStorage.request();
+      return PermissionResult(
+        granted: result.isGranted,
+        permanentlyDenied: result.isPermanentlyDenied,
+        message: result.isGranted ? null : '权限被拒绝',
+      );
+    } else {
+      // Android 10 及以下使用传统存储权限
+      final status = await Permission.storage.status;
+      
+      if (status.isGranted) {
+        return PermissionResult(granted: true);
+      }
+      
+      final result = await Permission.storage.request();
+      return PermissionResult(
+        granted: result.isGranted,
+        permanentlyDenied: result.isPermanentlyDenied,
+        message: result.isGranted ? null : '存储权限被拒绝',
+      );
+    }
+  }
+
+  /// 检查是否为 Android 11+
+  Future<bool> _isAndroid11OrHigher() async {
+    // 简单判断：检查 MANAGE_EXTERNAL_STORAGE 是否可用
+    try {
+      await Permission.manageExternalStorage.status;
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// 打开应用设置页面
+  Future<bool> openSettings() async {
+    return await openAppSettings();
+  }
+
   /// 获取中转站目录路径
   Future<String> get _transferDirPath async {
-    // 使用外部存储的公共目录
     if (Platform.isAndroid) {
       return '/storage/emulated/0/AiCodeTransfer';
     } else {
-      // iOS 或其他平台使用应用文档目录
       final dir = await getApplicationDocumentsDirectory();
       return '${dir.path}/AiCodeTransfer';
     }
@@ -53,11 +128,17 @@ class TransferService {
   }
 
   /// 确保中转站目录存在
-  Future<void> _ensureDirectoryExists() async {
-    final dirPath = await _transferDirPath;
-    final dir = Directory(dirPath);
-    if (!await dir.exists()) {
-      await dir.create(recursive: true);
+  Future<bool> _ensureDirectoryExists() async {
+    try {
+      final dirPath = await _transferDirPath;
+      final dir = Directory(dirPath);
+      if (!await dir.exists()) {
+        await dir.create(recursive: true);
+      }
+      return true;
+    } catch (e) {
+      print('创建目录失败: $e');
+      return false;
     }
   }
 
@@ -87,9 +168,22 @@ class TransferService {
   }
 
   /// 上传文件到中转站（追加模式）
-  Future<bool> uploadFiles(List<TransferFile> newFiles) async {
+  Future<({bool success, String? error})> uploadFiles(List<TransferFile> newFiles) async {
     try {
-      await _ensureDirectoryExists();
+      // 先检查权限
+      final permission = await checkAndRequestPermission();
+      if (!permission.granted) {
+        return (
+          success: false, 
+          error: permission.message ?? '存储权限被拒绝',
+        );
+      }
+
+      // 确保目录存在
+      final dirCreated = await _ensureDirectoryExists();
+      if (!dirCreated) {
+        return (success: false, error: '无法创建中转站目录');
+      }
       
       // 读取现有文件
       final existingFiles = await getFiles();
@@ -113,15 +207,15 @@ class TransferService {
       };
       
       await file.writeAsString(jsonEncode(data), flush: true);
-      return true;
+      return (success: true, error: null);
     } catch (e) {
       print('上传到中转站失败: $e');
-      return false;
+      return (success: false, error: e.toString());
     }
   }
 
   /// 上传单个文件
-  Future<bool> uploadFile(TransferFile file) async {
+  Future<({bool success, String? error})> uploadFile(TransferFile file) async {
     return uploadFiles([file]);
   }
 
