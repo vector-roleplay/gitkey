@@ -88,8 +88,10 @@ jobs:
             permission_handler: any
             archive: any
             open_filex: any
+            background_downloader: any
           
           dev_dependencies:
+
 
             flutter_test:
               sdk: flutter
