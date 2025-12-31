@@ -267,45 +267,31 @@ class _ParserScreenState extends State<ParserScreen> {
                       thumbVisibility: true,
                       thickness: 6,
                       radius: const Radius.circular(3),
-                      child: GestureDetector(
-                        // 拦截单击和双击，只允许长按触发选择
-                        onTap: () {
-                          // 单击时只移动光标，不触发选择
-                          FocusScope.of(context).requestFocus(FocusNode());
-                          Future.delayed(const Duration(milliseconds: 50), () {
-                            FocusScope.of(context).requestFocus(_textFieldFocusNode);
-                          });
-                        },
-                        onDoubleTap: () {
-                          // 双击时不做任何事（阻止默认的双击选择）
-                        },
-                        behavior: HitTestBehavior.translucent,
-                        child: TextField(
-                          controller: _controller,
-                          scrollController: _scrollController,
-                          focusNode: _textFieldFocusNode,
-                          maxLines: null,
-                          expands: true,
-                          textAlignVertical: TextAlignVertical.top,
-                          keyboardType: TextInputType.multiline,
-                          textInputAction: TextInputAction.newline,
-                          enableInteractiveSelection: true,
-                          style: const TextStyle(
-                            fontFamily: 'monospace',
-                            fontSize: 13,
-                            height: 1.4,
-                          ),
-                          decoration: const InputDecoration(
-                            hintText: '粘贴AI回复的消息到这里...\n(长按可选择文本)',
-                            border: OutlineInputBorder(),
-                            contentPadding: EdgeInsets.all(12),
-                          ),
+                      child: TextField(
+                        controller: _controller,
+                        scrollController: _scrollController,
+                        focusNode: _textFieldFocusNode,
+                        maxLines: null,
+                        expands: true,
+                        textAlignVertical: TextAlignVertical.top,
+                        keyboardType: TextInputType.multiline,
+                        textInputAction: TextInputAction.newline,
+                        // 禁用双击和三击选择，只保留长按选择
+                        magnifierConfiguration: TextMagnifierConfiguration.disabled,
+                        style: const TextStyle(
+                          fontFamily: 'monospace',
+                          fontSize: 13,
+                          height: 1.4,
+                        ),
+                        decoration: const InputDecoration(
+                          hintText: '粘贴AI回复的消息到这里...\n(长按可选择文本)',
+                          border: OutlineInputBorder(),
+                          contentPadding: EdgeInsets.all(12),
                         ),
                       ),
                     ),
-
-
                   ),
+
                   const SizedBox(width: 4),
                   Column(
                     mainAxisAlignment: MainAxisAlignment.center,
