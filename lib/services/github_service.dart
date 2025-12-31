@@ -175,10 +175,13 @@ class GitHubService {
     Map<String, String>? inputs,
   }) async {
     try {
-      final body = {
+      final body = <String, dynamic>{
         'ref': ref,
-        if (inputs != null) 'inputs': inputs,
       };
+      if (inputs != null && inputs.isNotEmpty) {
+        body['inputs'] = inputs;
+      }
+
 
       final response = await http.post(
         Uri.parse('$_baseUrl/repos/$owner/$repo/actions/workflows/$workflowId/dispatches'),
@@ -312,6 +315,32 @@ class GitHubService {
   }
 }
 
+/// 获取仓库的 workflows 列表
+  Future<({List<WorkflowInfo> workflows, String? error})> getWorkflows({
+    required String owner,
+    required String repo,
+  }) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$_baseUrl/repos/$owner/$repo/actions/workflows'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 15));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final list = (data['workflows'] as List)
+            .map((e) => WorkflowInfo.fromJson(e))
+            .where((w) => w.state == 'active')  // 只返回激活的 workflow
+            .toList();
+        return (workflows: list, error: null);
+      } else {
+        return (workflows: <WorkflowInfo>[], error: 'HTTP ${response.statusCode}');
+      }
+    } catch (e) {
+      return (workflows: <WorkflowInfo>[], error: e.toString());
+    }
+  }
+
 class GitHubFileResult {
   final bool success;
   final String? content;
@@ -338,6 +367,30 @@ class GitHubCommitResult {
     this.sha,
     this.error,
   });
+}
+
+class WorkflowInfo {
+  final int id;
+  final String name;
+  final String path;  // 如 ".github/workflows/android.yml"
+  final String state; // "active", "disabled_manually", etc.
+
+  WorkflowInfo({
+    required this.id,
+    required this.name,
+    required this.path,
+    required this.state,
+  });
+
+  factory WorkflowInfo.fromJson(Map<String, dynamic> json) => WorkflowInfo(
+    id: json['id'] as int,
+    name: json['name'] as String,
+    path: json['path'] as String,
+    state: json['state'] as String,
+  );
+
+  /// 获取文件名（用于 API 调用）
+  String get fileName => path.split('/').last;
 }
 
 class WorkflowRun {
