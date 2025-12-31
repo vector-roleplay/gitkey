@@ -125,48 +125,58 @@ class _EditorScreenState extends State<EditorScreen> {
           ),
         ],
       ),
-      body: CodeEditor(
-        controller: _controller,
-        onChanged: _onTextChanged,
-      ),
-      bottomNavigationBar: Container(
-        padding: EdgeInsets.only(
-          left: 16,
-          right: 16,
-          top: 12,
-          bottom: 12 + MediaQuery.of(context).padding.bottom,
-        ),
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surface,
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.1),
-              blurRadius: 4,
-              offset: const Offset(0, -2),
+      body: Column(
+        children: [
+          // 代码编辑区 - 占据剩余空间
+          Expanded(
+            child: CodeEditor(
+              controller: _controller,
+              onChanged: _onTextChanged,
             ),
-          ],
-        ),
-        child: Row(
-          children: [
-            if (_fileChange?.originalContent != null)
-              Text(
-                widget.filePath,
-                style: TextStyle(color: Colors.grey[500], fontSize: 12),
-                overflow: TextOverflow.ellipsis,
+          ),
+          
+          // 底部操作栏
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surface,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.1),
+                  blurRadius: 4,
+                  offset: const Offset(0, -2),
+                ),
+              ],
+            ),
+            child: SafeArea(
+              top: false,
+              child: Row(
+                children: [
+                  if (_fileChange?.originalContent != null)
+                    Expanded(
+                      child: Text(
+                        widget.filePath,
+                        style: TextStyle(color: Colors.grey[500], fontSize: 12),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  if (_fileChange?.originalContent == null)
+                    const Spacer(),
+                  OutlinedButton(
+                    onPressed: _reset,
+                    child: const Text('重置'),
+                  ),
+                  const SizedBox(width: 12),
+                  FilledButton.icon(
+                    onPressed: _save,
+                    icon: const Icon(Icons.save, size: 18),
+                    label: const Text('保存'),
+                  ),
+                ],
               ),
-            const Spacer(),
-            OutlinedButton(
-              onPressed: _reset,
-              child: const Text('重置'),
             ),
-            const SizedBox(width: 12),
-            FilledButton.icon(
-              onPressed: _save,
-              icon: const Icon(Icons.save, size: 18),
-              label: const Text('保存'),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
