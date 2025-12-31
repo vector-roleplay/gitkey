@@ -81,11 +81,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
     
     appState.addFileChanges(changes);
     
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('已恢复 ${changes.length} 个文件')),
-    );
-    
-    Navigator.pop(context);
+    // 返回主界面并传递消息
+    Navigator.pop(context, '已恢复 ${changes.length} 个文件');
+
   }
 
   @override
