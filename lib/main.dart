@@ -106,9 +106,67 @@ class AppState extends ChangeNotifier {
   bool _useWorkspaceMode = false;  // 是否使用本地工作区模式
   bool _targetIsWorkspace = false; // 推送目标是否为工作区
   
+  // ========== 构建状态（全局保持，避免页面切换时闪烁） ==========
+  int? _buildRunId;
+  String? _buildStatus;          // queued, in_progress, completed
+  String? _buildConclusion;      // success, failure, cancelled
+  DateTime? _buildStartTime;     // 用于计时（与官网同步）
+  String? _buildRepoFullName;    // 正在构建的仓库
+  bool _isDownloading = false;
+  double _downloadProgress = 0;
+  String? _downloadedApkPath;
+  
+  int? get buildRunId => _buildRunId;
+  String? get buildStatus => _buildStatus;
+  String? get buildConclusion => _buildConclusion;
+  DateTime? get buildStartTime => _buildStartTime;
+  String? get buildRepoFullName => _buildRepoFullName;
+  bool get isDownloading => _isDownloading;
+  double get downloadProgress => _downloadProgress;
+  String? get downloadedApkPath => _downloadedApkPath;
+  
+  bool get hasBuildInProgress => _buildStatus == 'queued' || _buildStatus == 'in_progress';
+  bool get isBuildSuccess => _buildStatus == 'completed' && _buildConclusion == 'success';
+  bool get isBuildFailed => _buildStatus == 'completed' && _buildConclusion != 'success';
+  
+  void updateBuildState({
+    int? runId,
+    String? status,
+    String? conclusion,
+    DateTime? startTime,
+    String? repoFullName,
+  }) {
+    _buildRunId = runId ?? _buildRunId;
+    _buildStatus = status ?? _buildStatus;
+    _buildConclusion = conclusion;
+    _buildStartTime = startTime ?? _buildStartTime;
+    _buildRepoFullName = repoFullName ?? _buildRepoFullName;
+    notifyListeners();
+  }
+  
+  void updateDownloadState({bool? isDownloading, double? progress, String? apkPath}) {
+    _isDownloading = isDownloading ?? _isDownloading;
+    _downloadProgress = progress ?? _downloadProgress;
+    _downloadedApkPath = apkPath ?? _downloadedApkPath;
+    notifyListeners();
+  }
+  
+  void clearBuildState() {
+    _buildRunId = null;
+    _buildStatus = null;
+    _buildConclusion = null;
+    _buildStartTime = null;
+    _buildRepoFullName = null;
+    _isDownloading = false;
+    _downloadProgress = 0;
+    _downloadedApkPath = null;
+    notifyListeners();
+  }
+  
   Repository? get selectedRepo => _selectedRepo;
   bool get useWorkspaceMode => _useWorkspaceMode;
   bool get targetIsWorkspace => _targetIsWorkspace;
+
 
   List<FileChange> get fileChanges => _fileChanges.values.toList();
   int get selectedCount => _fileChanges.values.where((f) => f.isSelected).length;
