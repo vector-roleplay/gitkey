@@ -695,9 +695,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         icon: const Icon(Icons.delete_sweep, size: 18, color: Colors.red),
                         label: const Text('清空', style: TextStyle(color: Colors.red)),
                       ),
+                      const SizedBox(width: 8),
+                      TextButton.icon(
+                        onPressed: _clearAllData,
+                        icon: const Icon(Icons.cleaning_services, size: 18, color: Colors.orange),
+                        label: const Text('一键清理', style: TextStyle(color: Colors.orange)),
+                      ),
                     ],
                   ),
                 ),
+
               ] else
                 Padding(
                   padding: const EdgeInsets.all(24),
@@ -924,7 +931,46 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await storage.clearWorkspace();
       _loadWorkspace();
     }
+  }/// 一键清理工作区和中转站
+  Future<void> _clearAllData() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.cleaning_services, color: Colors.orange),
+            SizedBox(width: 8),
+            Text('一键清理'),
+          ],
+        ),
+        content: const Text('确定要同时清空本地工作区和中转站的所有文件吗？\n\n此操作不可恢复！'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.orange),
+            child: const Text('确定清理'),
+          ),
+        ],
+      ),
+    );
+    
+    if (confirm == true) {
+      final storage = context.read<StorageService>();
+      await storage.clearWorkspace();
+      await TransferService.instance.clear();
+      _loadWorkspace();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('已清理工作区和中转站')),
+        );
+      }
+    }
   }
+
   
   void _viewWorkspaceFile(WorkspaceFile file) {
     showModalBottomSheet(
