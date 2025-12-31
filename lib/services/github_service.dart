@@ -345,6 +345,7 @@ class WorkflowRun {
   final String status;
   final String? conclusion;
   final String createdAt;
+  final String? runStartedAt;  // 实际开始执行的时间（用于计时同步）
   final String? htmlUrl;
 
   WorkflowRun({
@@ -352,6 +353,7 @@ class WorkflowRun {
     required this.status,
     this.conclusion,
     required this.createdAt,
+    this.runStartedAt,
     this.htmlUrl,
   });
 
@@ -360,13 +362,25 @@ class WorkflowRun {
     status: json['status'] as String,
     conclusion: json['conclusion'] as String?,
     createdAt: json['created_at'] as String,
+    runStartedAt: json['run_started_at'] as String?,
     htmlUrl: json['html_url'] as String?,
   );
+
+  /// 获取用于计时的开始时间（优先使用 runStartedAt，与官网同步）
+  DateTime? get startTime {
+    if (runStartedAt != null) {
+      return DateTime.tryParse(runStartedAt!);
+    }
+    return DateTime.tryParse(createdAt);
+  }
 
   bool get isCompleted => status == 'completed';
   bool get isSuccess => conclusion == 'success';
   bool get isRunning => status == 'in_progress' || status == 'queued';
+  bool get isQueued => status == 'queued';
+  bool get isInProgress => status == 'in_progress';
 }
+
 
 class Artifact {
   final int id;
