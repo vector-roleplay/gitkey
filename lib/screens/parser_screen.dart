@@ -271,18 +271,26 @@ class _ParserScreenState extends State<ParserScreen> {
                         textAlignVertical: TextAlignVertical.top,
                         keyboardType: TextInputType.multiline,
                         textInputAction: TextInputAction.newline,
+                        enableInteractiveSelection: true,
+                        contextMenuBuilder: (context, editableTextState) {
+                          // 只在长按时显示菜单，通过 contextMenuBuilder 自定义
+                          return AdaptiveTextSelectionToolbar.editableText(
+                            editableTextState: editableTextState,
+                          );
+                        },
                         style: const TextStyle(
                           fontFamily: 'monospace',
                           fontSize: 13,
                           height: 1.4,
                         ),
                         decoration: const InputDecoration(
-                          hintText: '粘贴AI回复的消息到这里...',
+                          hintText: '粘贴AI回复的消息到这里...\n(长按可选择复制)',
                           border: OutlineInputBorder(),
                           contentPadding: EdgeInsets.all(12),
                         ),
                       ),
                     ),
+
                   ),
                   const SizedBox(width: 4),
                   Column(
