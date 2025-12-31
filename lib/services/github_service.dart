@@ -313,9 +313,8 @@ class GitHubService {
       return (bytes: null, error: e.toString());
     }
   }
-}
 
-/// 获取仓库的 workflows 列表
+  /// 获取仓库的 workflows 列表
   Future<({List<WorkflowInfo> workflows, String? error})> getWorkflows({
     required String owner,
     required String repo,
@@ -330,7 +329,7 @@ class GitHubService {
         final data = jsonDecode(response.body);
         final list = (data['workflows'] as List)
             .map((e) => WorkflowInfo.fromJson(e))
-            .where((w) => w.state == 'active')  // 只返回激活的 workflow
+            .where((w) => w.state == 'active')
             .toList();
         return (workflows: list, error: null);
       } else {
@@ -340,8 +339,10 @@ class GitHubService {
       return (workflows: <WorkflowInfo>[], error: e.toString());
     }
   }
+}
 
 class GitHubFileResult {
+
   final bool success;
   final String? content;
   final String? sha;
