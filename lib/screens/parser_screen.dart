@@ -16,6 +16,8 @@ class ParserScreen extends StatefulWidget {
 class _ParserScreenState extends State<ParserScreen> {
   final _controller = TextEditingController();
   final _scrollController = ScrollController();
+  final _textFieldFocusNode = FocusNode();
+
   List<Instruction> _instructions = [];
   Set<int> _selectedIndices = {};
   List<String> _errors = [];
@@ -223,8 +225,10 @@ class _ParserScreenState extends State<ParserScreen> {
     _controller.removeListener(_onTextChanged);
     _controller.dispose();
     _scrollController.dispose();
+    _textFieldFocusNode.dispose();
     super.dispose();
   }
+
 
   @override
   Widget build(BuildContext context) {
@@ -263,33 +267,43 @@ class _ParserScreenState extends State<ParserScreen> {
                       thumbVisibility: true,
                       thickness: 6,
                       radius: const Radius.circular(3),
-                      child: TextField(
-                        controller: _controller,
-                        scrollController: _scrollController,
-                        maxLines: null,
-                        expands: true,
-                        textAlignVertical: TextAlignVertical.top,
-                        keyboardType: TextInputType.multiline,
-                        textInputAction: TextInputAction.newline,
-                        enableInteractiveSelection: true,
-                        contextMenuBuilder: (context, editableTextState) {
-                          // 只在长按时显示菜单，通过 contextMenuBuilder 自定义
-                          return AdaptiveTextSelectionToolbar.editableText(
-                            editableTextState: editableTextState,
-                          );
+                      child: GestureDetector(
+                        // 拦截单击和双击，只允许长按触发选择
+                        onTap: () {
+                          // 单击时只移动光标，不触发选择
+                          FocusScope.of(context).requestFocus(FocusNode());
+                          Future.delayed(const Duration(milliseconds: 50), () {
+                            FocusScope.of(context).requestFocus(_textFieldFocusNode);
+                          });
                         },
-                        style: const TextStyle(
-                          fontFamily: 'monospace',
-                          fontSize: 13,
-                          height: 1.4,
-                        ),
-                        decoration: const InputDecoration(
-                          hintText: '粘贴AI回复的消息到这里...\n(长按可选择复制)',
-                          border: OutlineInputBorder(),
-                          contentPadding: EdgeInsets.all(12),
+                        onDoubleTap: () {
+                          // 双击时不做任何事（阻止默认的双击选择）
+                        },
+                        behavior: HitTestBehavior.translucent,
+                        child: TextField(
+                          controller: _controller,
+                          scrollController: _scrollController,
+                          focusNode: _textFieldFocusNode,
+                          maxLines: null,
+                          expands: true,
+                          textAlignVertical: TextAlignVertical.top,
+                          keyboardType: TextInputType.multiline,
+                          textInputAction: TextInputAction.newline,
+                          enableInteractiveSelection: true,
+                          style: const TextStyle(
+                            fontFamily: 'monospace',
+                            fontSize: 13,
+                            height: 1.4,
+                          ),
+                          decoration: const InputDecoration(
+                            hintText: '粘贴AI回复的消息到这里...\n(长按可选择文本)',
+                            border: OutlineInputBorder(),
+                            contentPadding: EdgeInsets.all(12),
+                          ),
                         ),
                       ),
                     ),
+
 
                   ),
                   const SizedBox(width: 4),
