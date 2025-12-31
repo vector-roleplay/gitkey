@@ -32,9 +32,38 @@ class _SettingsScreenState extends State<SettingsScreen> {
   // 中转站相关
   int _transferFileCount = 0;
   Set<String> _selectedForTransfer = {};
+  
+  // 顶部提示消息
+  String? _topMessage;
+  bool _topMessageSuccess = true;
+
+  /// 显示顶部提示消息
+  void _showTopMessage(String message, {bool isSuccess = true}) {
+    setState(() {
+      _topMessage = message;
+      _topMessageSuccess = isSuccess;
+    });
+    
+    // 3秒后自动隐藏
+    Future.delayed(const Duration(seconds: 3), () {
+      if (mounted && _topMessage == message) {
+        setState(() {
+          _topMessage = null;
+        });
+      }
+    });
+  }
+  
+  /// 隐藏顶部提示
+  void _hideTopMessage() {
+    setState(() {
+      _topMessage = null;
+    });
+  }
 
   @override
   void initState() {
+
 
     super.initState();
     _loadData();
@@ -65,9 +94,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     
     if (mounted) {
       if (result.success) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('已上传: ${file.fileName}')),
-        );
+        _showTopMessage('已上传: ${file.fileName}', isSuccess: true);
         _loadTransferCount();
       } else {
         _handleUploadError(result.error);
@@ -76,12 +103,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
 
+
   /// 批量上传到中转站
   Future<void> _uploadSelectedToTransfer() async {
     if (_selectedForTransfer.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请先选择文件')),
-      );
+      _showTopMessage('请先选择文件', isSuccess: false);
       return;
     }
 
@@ -94,9 +120,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     
     if (mounted) {
       if (result.success) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('已上传 ${filesToUpload.length} 个文件到中转站')),
-        );
+        _showTopMessage('已上传 ${filesToUpload.length} 个文件到中转站', isSuccess: true);
         setState(() {
           _selectedForTransfer.clear();
         });
@@ -107,15 +131,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+
   /// 上传全部工作区文件到中转站
 
   Future<void> _uploadAllToTransfer() async {
     if (_workspaceFiles.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('工作区没有文件')),
-      );
+      _showTopMessage('工作区没有文件', isSuccess: false);
       return;
     }
+
 
     final confirm = await showDialog<bool>(
       context: context,
@@ -145,9 +169,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     
     if (mounted) {
       if (result.success) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('已上传 ${filesToUpload.length} 个文件到中转站')),
-        );
+        _showTopMessage('已上传 ${filesToUpload.length} 个文件到中转站', isSuccess: true);
         _loadTransferCount();
       } else {
         _handleUploadError(result.error);
@@ -156,6 +178,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   /// 处理上传错误（显示权限引导对话框）
+
   void _handleUploadError(String? error) {
     if (error != null && error.contains('权限')) {
       // 显示权限引导对话框
@@ -200,13 +223,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
       );
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('上传失败: ${error ?? "未知错误"}')),
-      );
+      _showTopMessage('上传失败: ${error ?? "未知错误"}', isSuccess: false);
     }
   }
 
   /// 查看中转站内容
+
 
   Future<void> _viewTransferStation() async {
     final files = await TransferService.instance.getFiles();
@@ -241,14 +263,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         await TransferService.instance.clear();
                         _loadTransferCount();
                         if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('中转站已清空')),
-                          );
+                          _showTopMessage('中转站已清空', isSuccess: true);
                         }
                       },
                       icon: const Icon(Icons.delete_sweep, size: 18, color: Colors.red),
                       label: const Text('清空', style: TextStyle(color: Colors.red)),
                     ),
+
                   IconButton(
                     icon: const Icon(Icons.close),
                     onPressed: () => Navigator.pop(ctx),
@@ -475,8 +496,59 @@ class _SettingsScreenState extends State<SettingsScreen> {
       appBar: AppBar(
         title: const Text('设置'),
       ),
-      body: ListView(
+      body: Column(
         children: [
+          // 顶部提示消息
+          if (_topMessage != null)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              decoration: BoxDecoration(
+                color: _topMessageSuccess 
+                    ? Colors.green.withOpacity(0.15) 
+                    : Colors.orange.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: _topMessageSuccess 
+                      ? Colors.green.withOpacity(0.3) 
+                      : Colors.orange.withOpacity(0.3),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    _topMessageSuccess ? Icons.check_circle : Icons.info,
+                    color: _topMessageSuccess ? Colors.green : Colors.orange,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      _topMessage!,
+                      style: TextStyle(
+                        color: _topMessageSuccess ? Colors.green[700] : Colors.orange[700],
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                  GestureDetector(
+                    onTap: _hideTopMessage,
+                    child: Icon(
+                      Icons.close,
+                      color: _topMessageSuccess ? Colors.green[400] : Colors.orange[400],
+                      size: 18,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          
+          // 主体内容
+          Expanded(
+            child: ListView(
+              children: [
+
           _buildSection(
             title: 'GitHub 认证',
             children: [
@@ -758,10 +830,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ],
           ),
+              ],
+            ),
+          ),
         ],
       ),
     );
   }
+
 
   
   Future<void> _toggleWorkspaceMode(bool enabled) async {
@@ -810,11 +886,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   
   Future<void> _importFromGit() async {
     if (_repos.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请先添加仓库')),
-      );
+      _showTopMessage('请先添加仓库', isSuccess: false);
       return;
     }
+
     
     // 选择仓库
     final selectedRepo = await showDialog<Repository>(
@@ -912,13 +987,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
     
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('已导入 ${newFiles.length} 个文件${failCount > 0 ? '，$failCount 个失败' : ''}')),
+      _showTopMessage(
+        '已导入 ${newFiles.length} 个文件${failCount > 0 ? '，$failCount 个失败' : ''}',
+        isSuccess: failCount == 0,
       );
     }
   }
   
   Future<void> _removeWorkspaceFile(String path) async {
+
     final storage = context.read<StorageService>();
     await storage.removeWorkspaceFile(path);
     _loadWorkspace();
@@ -981,15 +1058,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await TransferService.instance.clear();
       _loadWorkspace();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('已清理工作区和中转站')),
-        );
+        _showTopMessage('已清理工作区和中转站', isSuccess: true);
       }
     }
   }
 
   
   void _viewWorkspaceFile(WorkspaceFile file) {
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
