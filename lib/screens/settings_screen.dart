@@ -877,9 +877,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await storage.addWorkspaceFiles(newFiles);
       _loadWorkspace();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('已导入 ${newFiles.length} 个文件')),
-        );
+        _showTopMessage('已导入 ${newFiles.length} 个文件', isSuccess: true);
       }
     }
   }
@@ -889,6 +887,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _showTopMessage('请先添加仓库', isSuccess: false);
       return;
     }
+
 
     
     // 选择仓库
