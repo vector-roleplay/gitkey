@@ -63,12 +63,18 @@ class _ParserScreenState extends State<ParserScreen> {
     final currentPosition = _controller.selection.baseOffset;
     if (currentPosition <= 0) return;
     
+    // 找到当前位置之前的最近一个文件标记
+    int? targetPosition;
     for (int i = _fileMarkerPositions.length - 1; i >= 0; i--) {
-      if (_fileMarkerPositions[i] < currentPosition - 1) {
-        _controller.selection = TextSelection.collapsed(offset: _fileMarkerPositions[i]);
-        _ensureCursorVisible();
+      // 必须严格小于当前位置，并且留出一定余量避免跳转到当前行
+      if (_fileMarkerPositions[i] < currentPosition - 5) {
+        targetPosition = _fileMarkerPositions[i];
         break;
       }
+    }
+    
+    if (targetPosition != null) {
+      _jumpToPosition(targetPosition);
     }
   }
   
@@ -77,25 +83,44 @@ class _ParserScreenState extends State<ParserScreen> {
     
     for (int i = 0; i < _fileMarkerPositions.length; i++) {
       if (_fileMarkerPositions[i] > currentPosition) {
-        _controller.selection = TextSelection.collapsed(offset: _fileMarkerPositions[i]);
-        _ensureCursorVisible();
+        _jumpToPosition(_fileMarkerPositions[i]);
         break;
       }
     }
   }
   
-  void _ensureCursorVisible() {
+  void _jumpToPosition(int position) {
+    // 先设置光标位置
+    _controller.selection = TextSelection.collapsed(offset: position);
+    
+    // 请求焦点，让 TextField 自动滚动到光标位置
+    _textFieldFocusNode.requestFocus();
+    
+    // 额外保证：手动计算并滚动
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        final textLength = _controller.text.length;
-        if (textLength == 0) return;
-        final cursorPosition = _controller.selection.baseOffset;
-        final ratio = cursorPosition / textLength;
-        final targetScroll = _scrollController.position.maxScrollExtent * ratio;
-        _scrollController.jumpTo(targetScroll.clamp(0, _scrollController.position.maxScrollExtent));
-      }
+      _scrollToCursor(position);
     });
   }
+  
+  void _scrollToCursor(int cursorPosition) {
+    if (!_scrollController.hasClients) return;
+    
+    final text = _controller.text;
+    if (text.isEmpty) return;
+    
+    // 计算光标所在行数
+    final textBeforeCursor = text.substring(0, cursorPosition.clamp(0, text.length));
+    final lineNumber = '\n'.allMatches(textBeforeCursor).length;
+    
+    // 估算每行高度（基于字体大小和行高）
+    const double lineHeight = 13.0 * 1.4 + 2; // fontSize * height + padding
+    final targetScroll = lineNumber * lineHeight;
+    
+    // 滚动到目标位置，留出一些上边距
+    final scrollTo = (targetScroll - 50).clamp(0.0, _scrollController.position.maxScrollExtent);
+    _scrollController.jumpTo(scrollTo);
+  }
+
   
   void _parseMessage() {
     final parser = context.read<ParserService>();
