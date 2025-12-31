@@ -22,9 +22,15 @@ class _BuildScreenState extends State<BuildScreen> {
   Repository? _selectedRepo;
   String _buildType = 'release';
   
+  // Workflow 相关
+  List<WorkflowInfo> _workflows = [];
+  WorkflowInfo? _selectedWorkflow;
+  bool _isLoadingWorkflows = false;
+  
   // 状态
   bool _isTriggering = false;
   String? _errorMessage;
+
   
   Timer? _pollTimer;
   Timer? _tickTimer;
@@ -52,7 +58,73 @@ class _BuildScreenState extends State<BuildScreen> {
       _repos = storage.getRepositories();
       _selectedRepo = storage.getDefaultRepository();
     });
+    
+    // 如果有默认仓库，自动加载其 workflows
+    if (_selectedRepo != null) {
+      _loadWorkflows(_selectedRepo!);
+    }
   }
+
+  /// 加载仓库的 workflows
+  Future<void> _loadWorkflows(Repository repo) async {
+    setState(() {
+      _isLoadingWorkflows = true;
+      _workflows = [];
+      _selectedWorkflow = null;
+      _errorMessage = null;
+    });
+
+    final github = context.read<GitHubService>();
+    final result = await github.getWorkflows(
+      owner: repo.owner,
+      repo: repo.name,
+    );
+
+    if (result.error != null) {
+      setState(() {
+        _isLoadingWorkflows = false;
+        _errorMessage = '获取 workflows 失败: ${result.error}';
+      });
+      return;
+    }
+
+    if (result.workflows.isEmpty) {
+      setState(() {
+        _isLoadingWorkflows = false;
+        _errorMessage = '该仓库没有配置 GitHub Actions workflow';
+      });
+      return;
+    }
+
+    // 自动选择 workflow
+    WorkflowInfo? selected;
+    if (result.workflows.length == 1) {
+      // 只有一个，直接用
+      selected = result.workflows.first;
+    } else {
+      // 多个时，优先选包含 android/build/apk 关键词的
+      final keywords = ['android', 'build', 'apk', 'flutter'];
+      for (final keyword in keywords) {
+        selected = result.workflows.firstWhere(
+          (w) => w.name.toLowerCase().contains(keyword) || 
+                 w.fileName.toLowerCase().contains(keyword),
+          orElse: () => result.workflows.first,
+        );
+        if (selected.name.toLowerCase().contains(keyword) ||
+            selected.fileName.toLowerCase().contains(keyword)) {
+          break;
+        }
+      }
+      selected ??= result.workflows.first;
+    }
+
+    setState(() {
+      _isLoadingWorkflows = false;
+      _workflows = result.workflows;
+      _selectedWorkflow = selected;
+    });
+  }
+
 
   /// 初始化构建状态（从全局状态恢复，或检查现有构建）
   Future<void> _initBuildState() async {
@@ -79,7 +151,7 @@ class _BuildScreenState extends State<BuildScreen> {
 
   /// 检查是否有正在进行的构建
   Future<void> _checkExistingBuild() async {
-    if (_selectedRepo == null) return;
+    if (_selectedRepo == null || _selectedWorkflow == null) return;
     
     final github = context.read<GitHubService>();
     final appState = context.read<AppState>();
@@ -87,8 +159,9 @@ class _BuildScreenState extends State<BuildScreen> {
     final result = await github.getLatestWorkflowRun(
       owner: _selectedRepo!.owner,
       repo: _selectedRepo!.name,
-      workflowId: 'android.yml',
+      workflowId: _selectedWorkflow!.fileName,
     );
+
 
     if (result.run != null && result.run!.isRunning) {
       // 有正在进行的构建，更新全局状态
@@ -151,6 +224,11 @@ class _BuildScreenState extends State<BuildScreen> {
       return;
     }
 
+    if (_selectedWorkflow == null) {
+      setState(() => _errorMessage = '未找到可用的 workflow');
+      return;
+    }
+
     final appState = context.read<AppState>();
     
     setState(() {
@@ -162,13 +240,23 @@ class _BuildScreenState extends State<BuildScreen> {
     appState.clearBuildState();
 
     final github = context.read<GitHubService>();
+    
+    // 检查 workflow 是否需要 build_type 参数
+    // 如果不需要，就不传（避免报错）
+    Map<String, String>? inputs;
+    if (_selectedWorkflow!.name.toLowerCase().contains('android') ||
+        _selectedWorkflow!.fileName.toLowerCase().contains('android')) {
+      inputs = {'build_type': _buildType};
+    }
+    
     final result = await github.triggerWorkflow(
       owner: _selectedRepo!.owner,
       repo: _selectedRepo!.name,
-      workflowId: 'android.yml',
+      workflowId: _selectedWorkflow!.fileName,
       ref: _selectedRepo!.branch,
-      inputs: {'build_type': _buildType},
+      inputs: inputs,
     );
+
 
     if (result.success) {
       setState(() {
@@ -213,13 +301,14 @@ class _BuildScreenState extends State<BuildScreen> {
     final github = context.read<GitHubService>();
     final appState = context.read<AppState>();
     
-    if (_selectedRepo == null) return;
+    if (_selectedRepo == null || _selectedWorkflow == null) return;
     
     final result = await github.getLatestWorkflowRun(
       owner: _selectedRepo!.owner,
       repo: _selectedRepo!.name,
-      workflowId: 'android.yml',
+      workflowId: _selectedWorkflow!.fileName,
     );
+
 
     if (result.run != null) {
       // 更新全局状态
@@ -426,12 +515,14 @@ class _BuildScreenState extends State<BuildScreen> {
                     )).toList(),
                     onChanged: hasActiveTask ? null : (value) {
                       if (value != null) {
+                        final repo = _repos.firstWhere((r) => r.fullName == value);
                         setState(() {
-                          _selectedRepo = _repos.firstWhere((r) => r.fullName == value);
+                          _selectedRepo = repo;
                         });
-                        _checkExistingBuild();
+                        _loadWorkflows(repo);
                       }
                     },
+
                     hint: const Text('请选择仓库'),
                   ),
                 ],
@@ -439,10 +530,59 @@ class _BuildScreenState extends State<BuildScreen> {
             ),
           ),
           
+          // Workflow 信息显示
+          if (_isLoadingWorkflows)
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Center(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                    SizedBox(width: 12),
+                    Text('正在获取 workflow...'),
+                  ],
+                ),
+              ),
+            )
+          else if (_selectedWorkflow != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.green.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.green.withOpacity(0.3)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.check_circle, color: Colors.green, size: 18),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Workflow: ${_selectedWorkflow!.name}',
+                        style: TextStyle(color: Colors.green[700], fontSize: 13),
+                      ),
+                    ),
+                    Text(
+                      _selectedWorkflow!.fileName,
+                      style: TextStyle(color: Colors.grey[600], fontSize: 11),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          
           const SizedBox(height: 12),
           
           // 构建类型
           Card(
+
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
@@ -473,16 +613,23 @@ class _BuildScreenState extends State<BuildScreen> {
           const SizedBox(height: 12),
           
           // 触发构建按钮
-          SizedBox(
-            height: 48,
-            child: FilledButton.icon(
-              onPressed: _isTriggering || hasActiveTask ? null : _triggerBuild,
-              icon: _isTriggering
-                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Icon(Icons.play_arrow),
-              label: Text(_isTriggering ? '触发中...' : (hasActiveTask ? '构建中...' : '开始构建')),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: SizedBox(
+              width: double.infinity,
+              height: 48,
+              child: FilledButton.icon(
+                onPressed: _isTriggering || hasActiveTask || _selectedWorkflow == null || _isLoadingWorkflows
+                    ? null 
+                    : _triggerBuild,
+                icon: _isTriggering
+                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : const Icon(Icons.play_arrow),
+                label: Text(_isTriggering ? '触发中...' : (hasActiveTask ? '构建中...' : '开始构建')),
+              ),
             ),
           ),
+
           
           const SizedBox(height: 16),
           
