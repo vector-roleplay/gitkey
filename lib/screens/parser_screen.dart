@@ -18,7 +18,11 @@ class _ParserScreenState extends State<ParserScreen> {
   final _scrollController = ScrollController();
   final _textFieldFocusNode = FocusNode();
 
+  // 用于检测是否是长按（而非双击）
+  DateTime? _pointerDownTime;
+  
   List<Instruction> _instructions = [];
+
   Set<int> _selectedIndices = {};
   List<String> _errors = [];
   bool _isProcessing = false;
@@ -267,30 +271,56 @@ class _ParserScreenState extends State<ParserScreen> {
                       thumbVisibility: true,
                       thickness: 6,
                       radius: const Radius.circular(3),
-                      child: TextField(
-                        controller: _controller,
-                        scrollController: _scrollController,
-                        focusNode: _textFieldFocusNode,
-                        maxLines: null,
-                        expands: true,
-                        textAlignVertical: TextAlignVertical.top,
-                        keyboardType: TextInputType.multiline,
-                        textInputAction: TextInputAction.newline,
-                        // 禁用双击和三击选择，只保留长按选择
-                        magnifierConfiguration: TextMagnifierConfiguration.disabled,
-                        style: const TextStyle(
-                          fontFamily: 'monospace',
-                          fontSize: 13,
-                          height: 1.4,
-                        ),
-                        decoration: const InputDecoration(
-                          hintText: '粘贴AI回复的消息到这里...\n(长按可选择文本)',
-                          border: OutlineInputBorder(),
-                          contentPadding: EdgeInsets.all(12),
+                      // 使用 Listener 检测按下时长，阻止双击选择
+                      child: Listener(
+                        onPointerDown: (event) {
+                          _pointerDownTime = DateTime.now();
+                        },
+                        onPointerUp: (event) {
+                          final downTime = _pointerDownTime;
+                          if (downTime != null) {
+                            final duration = DateTime.now().difference(downTime);
+                            // 如果按下时间少于 400ms，认为是快速点击（包括双击）
+                            // 长按阈值通常是 500ms
+                            if (duration.inMilliseconds < 400) {
+                              // 延迟执行，等待 TextField 处理完选择
+                              Future.delayed(const Duration(milliseconds: 50), () {
+                                if (mounted && 
+                                    _controller.selection.baseOffset != _controller.selection.extentOffset) {
+                                  // 有选择但不是长按触发的，清除它
+                                  _controller.selection = TextSelection.collapsed(
+                                    offset: _controller.selection.extentOffset,
+                                  );
+                                }
+                              });
+                            }
+                          }
+                          _pointerDownTime = null;
+                        },
+                        child: TextField(
+                          controller: _controller,
+                          scrollController: _scrollController,
+                          focusNode: _textFieldFocusNode,
+                          maxLines: null,
+                          expands: true,
+                          textAlignVertical: TextAlignVertical.top,
+                          keyboardType: TextInputType.multiline,
+                          textInputAction: TextInputAction.newline,
+                          style: const TextStyle(
+                            fontFamily: 'monospace',
+                            fontSize: 13,
+                            height: 1.4,
+                          ),
+                          decoration: const InputDecoration(
+                            hintText: '粘贴AI回复的消息到这里...\n(长按可选择文本)',
+                            border: OutlineInputBorder(),
+                            contentPadding: EdgeInsets.all(12),
+                          ),
                         ),
                       ),
                     ),
                   ),
+
 
                   const SizedBox(width: 4),
                   Column(
