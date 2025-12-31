@@ -14,7 +14,10 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   List<Repository> _repos = [];
-  bool _isPushing = false;
+  bool _isPushing = false;// 顶部提示消息
+  String? _topMessage;
+  bool _topMessageSuccess = true;
+
   
   @override
   void initState() {
@@ -32,7 +35,30 @@ class _HomeScreenState extends State<HomeScreen> {
     if (appState.selectedRepo == null && _repos.isNotEmpty) {
       appState.setSelectedRepo(storage.getDefaultRepository());
     }
+  }/// 显示顶部提示消息
+  void _showTopMessage(String message, {bool isSuccess = true}) {
+    setState(() {
+      _topMessage = message;
+      _topMessageSuccess = isSuccess;
+    });
+    
+    // 3秒后自动隐藏
+    Future.delayed(const Duration(seconds: 3), () {
+      if (mounted && _topMessage == message) {
+        setState(() {
+          _topMessage = null;
+        });
+      }
+    });
   }
+  
+  /// 隐藏顶部提示
+  void _hideTopMessage() {
+    setState(() {
+      _topMessage = null;
+    });
+  }
+
   
   Future<void> _pushChanges() async {
     final appState = context.read<AppState>();
@@ -105,19 +131,16 @@ class _HomeScreenState extends State<HomeScreen> {
     
     setState(() => _isPushing = false);
     
-    // 延迟到下一帧显示，避免被状态更新吞掉
+    // 显示顶部提示
     if (mounted) {
-      final message = '推送完成: $successCount 成功, $failCount 失败';
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(message)),
-          );
-        }
-      });
+      _showTopMessage(
+        '推送完成: $successCount 成功, $failCount 失败',
+        isSuccess: failCount == 0,
+      );
     }
 
   }
+
   
   Future<bool> _pushSingleFile(GitHubService github, Repository repo, FileChange change) async {
     if (change.operationType == OperationType.deleteFile) {
@@ -176,17 +199,12 @@ class _HomeScreenState extends State<HomeScreen> {
     
     setState(() => _isPushing = false);
     
+    // 显示顶部提示
     if (mounted) {
-      final message = '已保存 $successCount 个文件到本地工作区';
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(message)),
-          );
-        }
-      });
+      _showTopMessage('已保存 $successCount 个文件到本地工作区', isSuccess: true);
     }
   }
+
 
 
   @override
@@ -200,8 +218,14 @@ class _HomeScreenState extends State<HomeScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.history),
-            onPressed: () => Navigator.pushNamed(context, '/history'),
+            onPressed: () async {
+              final result = await Navigator.pushNamed(context, '/history');
+              if (result != null && result is String && mounted) {
+                _showTopMessage(result, isSuccess: true);
+              }
+            },
           ),
+
           IconButton(
             icon: const Icon(Icons.settings),
             onPressed: () async {
@@ -213,8 +237,55 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       body: Column(
         children: [
+          // 顶部提示消息
+          if (_topMessage != null)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              decoration: BoxDecoration(
+                color: _topMessageSuccess 
+                    ? Colors.green.withOpacity(0.15) 
+                    : Colors.orange.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: _topMessageSuccess 
+                      ? Colors.green.withOpacity(0.3) 
+                      : Colors.orange.withOpacity(0.3),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    _topMessageSuccess ? Icons.check_circle : Icons.info,
+                    color: _topMessageSuccess ? Colors.green : Colors.orange,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      _topMessage!,
+                      style: TextStyle(
+                        color: _topMessageSuccess ? Colors.green[700] : Colors.orange[700],
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                  GestureDetector(
+                    onTap: _hideTopMessage,
+                    child: Icon(
+                      Icons.close,
+                      color: _topMessageSuccess ? Colors.green[400] : Colors.orange[400],
+                      size: 18,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          
           // 推送目标选择
           Padding(
+
             padding: const EdgeInsets.all(16),
             child: DropdownButtonFormField<String>(
               decoration: const InputDecoration(
