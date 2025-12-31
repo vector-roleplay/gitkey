@@ -705,7 +705,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ),
 
-              ] else
+              ] else ...[
                 Padding(
                   padding: const EdgeInsets.all(24),
                   child: Center(
@@ -715,6 +715,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ),
                 ),
+                // 即使工作区为空，也显示一键清理按钮（用于清理中转站）
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: _clearAllData,
+                      icon: const Icon(Icons.cleaning_services, size: 18, color: Colors.orange),
+                      label: const Text('一键清理中转站', style: TextStyle(color: Colors.orange)),
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: Colors.orange),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+
             ],
           ),
           
