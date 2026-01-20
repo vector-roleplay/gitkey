@@ -19,7 +19,7 @@ class _ParserScreenState extends State<ParserScreen> {
   
   // [FILESISU] 标记位置
   List<int> _fileMarkerPositions = [];
-  int _currentMarkerIndex = -1;
+  int _currentMarkerIndex = 0;
   
   // 解析结果
   List<Instruction> _instructions = [];
@@ -53,8 +53,11 @@ class _ParserScreenState extends State<ParserScreen> {
     
     setState(() {
       _fileMarkerPositions = matches.map((m) => m.start).toList();
+      // 确保 index 在有效范围内
       if (_fileMarkerPositions.isEmpty) {
-        _currentMarkerIndex = -1;
+        _currentMarkerIndex = 0;
+      } else if (_currentMarkerIndex >= _fileMarkerPositions.length) {
+        _currentMarkerIndex = _fileMarkerPositions.length - 1;
       }
     });
   }
@@ -69,23 +72,19 @@ class _ParserScreenState extends State<ParserScreen> {
   /// 跳转到上一个标记
   void _goToPrevious() {
     if (_fileMarkerPositions.isEmpty) return;
-    if (_currentMarkerIndex <= 0) {
-      _currentMarkerIndex = 0;
-    } else {
+    if (_currentMarkerIndex > 0) {
       _currentMarkerIndex--;
+      _jumpToMarker(_fileMarkerPositions[_currentMarkerIndex]);
     }
-    _jumpToMarker(_fileMarkerPositions[_currentMarkerIndex]);
   }
   
   /// 跳转到下一个标记
   void _goToNext() {
     if (_fileMarkerPositions.isEmpty) return;
-    if (_currentMarkerIndex >= _fileMarkerPositions.length - 1) {
-      _currentMarkerIndex = _fileMarkerPositions.length - 1;
-    } else {
+    if (_currentMarkerIndex < _fileMarkerPositions.length - 1) {
       _currentMarkerIndex++;
+      _jumpToMarker(_fileMarkerPositions[_currentMarkerIndex]);
     }
-    _jumpToMarker(_fileMarkerPositions[_currentMarkerIndex]);
   }
   
   /// 跳转到最后一个标记
@@ -103,15 +102,20 @@ class _ParserScreenState extends State<ParserScreen> {
     // 计算滚动位置（估算）
     final text = _controller.text.substring(0, position);
     final lineCount = '\n'.allMatches(text).length;
-    final estimatedOffset = lineCount * 20.0; // 每行约20像素
+    final lineHeight = 13 * 1.4; // fontSize * height
+    final estimatedOffset = lineCount * lineHeight;
     
-    if (_scrollController.hasClients) {
-      _scrollController.animateTo(
-        estimatedOffset.clamp(0, _scrollController.position.maxScrollExtent),
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOut,
-      );
-    }
+    // 延迟执行，确保布局完成
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        final maxScroll = _scrollController.position.maxScrollExtent;
+        _scrollController.animateTo(
+          estimatedOffset.clamp(0.0, maxScroll),
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
     
     setState(() {});
   }
@@ -241,7 +245,7 @@ class _ParserScreenState extends State<ParserScreen> {
     _controller.clear();
     setState(() {
       _fileMarkerPositions = [];
-      _currentMarkerIndex = -1;
+      _currentMarkerIndex = 0;
       _instructions = [];
       _selectedIndices = {};
       _errors = [];
@@ -283,7 +287,7 @@ class _ParserScreenState extends State<ParserScreen> {
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text(
-                      '${_currentMarkerIndex >= 0 ? _currentMarkerIndex + 1 : 0}/${_fileMarkerPositions.length}',
+                      '${_currentMarkerIndex + 1}/${_fileMarkerPositions.length}',
                       style: const TextStyle(
                         color: Colors.white,
                         fontWeight: FontWeight.bold,
@@ -315,11 +319,7 @@ class _ParserScreenState extends State<ParserScreen> {
                   children: [
                     // 代码编辑区
                     Expanded(
-                      child: Scrollbar(
-                        controller: _scrollController,
-                        thumbVisibility: true,
-                        child: _buildHighlightedTextField(),
-                      ),
+                      child: _buildEditor(),
                     ),
                     // 右侧快捷按钮
                     if (hasMarkers)
@@ -498,43 +498,98 @@ class _ParserScreenState extends State<ParserScreen> {
     );
   }
   
-  /// 构建带高亮的文本编辑器
-  Widget _buildHighlightedTextField() {
-    return Stack(
-      children: [
-        // 高亮层
-        SingleChildScrollView(
-          controller: _scrollController,
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: _buildHighlightedText(),
+  /// 构建编辑器（简化版，不使用Stack叠加）
+  Widget _buildEditor() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    
+    return Scrollbar(
+      controller: _scrollController,
+      thumbVisibility: true,
+      child: SingleChildScrollView(
+        controller: _scrollController,
+        child: _controller.text.isEmpty
+            ? TextField(
+                controller: _controller,
+                maxLines: null,
+                keyboardType: TextInputType.multiline,
+                style: TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 13,
+                  height: 1.4,
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
+                decoration: const InputDecoration(
+                  hintText: '粘贴AI回复的消息到这里...',
+                  hintStyle: TextStyle(color: Colors.grey),
+                  border: InputBorder.none,
+                  contentPadding: EdgeInsets.all(12),
+                ),
+              )
+            : GestureDetector(
+                onTap: () {
+                  // 点击时显示编辑模式
+                  _showEditDialog();
+                },
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: _buildHighlightedText(),
+                ),
+              ),
+      ),
+    );
+  }
+  
+  /// 显示编辑对话框
+  void _showEditDialog() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(ctx).viewInsets.bottom,
+        ),
+        child: Container(
+          height: MediaQuery.of(ctx).size.height * 0.7,
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  const Text('编辑内容', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  const Spacer(),
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text('完成'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Expanded(
+                child: TextField(
+                  controller: _controller,
+                  maxLines: null,
+                  expands: true,
+                  textAlignVertical: TextAlignVertical.top,
+                  keyboardType: TextInputType.multiline,
+                  style: TextStyle(
+                    fontFamily: 'monospace',
+                    fontSize: 13,
+                    height: 1.4,
+                    color: Theme.of(context).brightness == Brightness.dark 
+                        ? Colors.white 
+                        : Colors.black87,
+                  ),
+                  decoration: const InputDecoration(
+                    border: OutlineInputBorder(),
+                    contentPadding: EdgeInsets.all(12),
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
-        // 透明编辑层
-        Positioned.fill(
-          child: TextField(
-            controller: _controller,
-            scrollController: _scrollController,
-            maxLines: null,
-            expands: true,
-            textAlignVertical: TextAlignVertical.top,
-            keyboardType: TextInputType.multiline,
-            style: const TextStyle(
-              fontFamily: 'monospace',
-              fontSize: 13,
-              height: 1.4,
-              color: Colors.transparent,
-            ),
-            cursorColor: Theme.of(context).colorScheme.primary,
-            decoration: const InputDecoration(
-              hintText: '粘贴AI回复的消息到这里...',
-              hintStyle: TextStyle(color: Colors.grey),
-              border: InputBorder.none,
-              contentPadding: EdgeInsets.all(12),
-            ),
-          ),
-        ),
-      ],
+      ),
     );
   }
   
@@ -545,6 +600,9 @@ class _ParserScreenState extends State<ParserScreen> {
       return const SizedBox.shrink();
     }
     
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final normalColor = isDark ? Colors.white : Colors.black87;
+    
     final pattern = RegExp(r'\[FILESISU\][^\n]*', caseSensitive: false);
     final spans = <TextSpan>[];
     int lastEnd = 0;
@@ -554,11 +612,7 @@ class _ParserScreenState extends State<ParserScreen> {
       if (match.start > lastEnd) {
         spans.add(TextSpan(
           text: text.substring(lastEnd, match.start),
-          style: TextStyle(
-            color: Theme.of(context).brightness == Brightness.dark 
-                ? Colors.white 
-                : Colors.black87,
-          ),
+          style: TextStyle(color: normalColor),
         ));
       }
       
@@ -579,11 +633,7 @@ class _ParserScreenState extends State<ParserScreen> {
     if (lastEnd < text.length) {
       spans.add(TextSpan(
         text: text.substring(lastEnd),
-        style: TextStyle(
-          color: Theme.of(context).brightness == Brightness.dark 
-              ? Colors.white 
-              : Colors.black87,
-        ),
+        style: TextStyle(color: normalColor),
       ));
     }
     
