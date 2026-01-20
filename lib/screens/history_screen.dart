@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../main.dart';
 import '../models.dart';
 import '../services/storage_service.dart';
+import '../services/transfer_service.dart';
 
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
@@ -83,7 +84,94 @@ class _HistoryScreenState extends State<HistoryScreen> {
     
     // 返回主界面并传递消息
     Navigator.pop(context, '已恢复 ${changes.length} 个文件');
+  }
 
+  /// 同步到工作区（清理后推送到本地工作区和中转站）
+  Future<void> _syncToWorkspace(OperationHistory history) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.sync, color: Colors.blue),
+            SizedBox(width: 8),
+            Text('同步到工作区'),
+          ],
+        ),
+        content: Text(
+          '此操作将：\n'
+          '1. 清空本地工作区\n'
+          '2. 清空中转站\n'
+          '3. 将 ${history.changes.length} 个文件同步到工作区和中转站\n\n'
+          '确定继续吗？',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('确定同步'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    // 显示加载指示
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => const Center(child: CircularProgressIndicator()),
+    );
+
+    try {
+      final storage = context.read<StorageService>();
+      
+      // 1. 清空本地工作区
+      await storage.clearWorkspace();
+      
+      // 2. 清空中转站
+      await TransferService.instance.clear();
+      
+      // 3. 转换为工作区文件并保存
+      final workspaceFiles = history.changes
+          .where((c) => c.modifiedContent != null)
+          .map((c) => WorkspaceFile(
+                path: c.filePath,
+                content: c.modifiedContent!,
+              ))
+          .toList();
+      
+      if (workspaceFiles.isNotEmpty) {
+        await storage.addWorkspaceFiles(workspaceFiles);
+        
+        // 4. 同时上传到中转站
+        final transferFiles = workspaceFiles
+            .map((f) => TransferFile(path: f.path, content: f.content))
+            .toList();
+        await TransferService.instance.uploadFiles(transferFiles);
+      }
+
+      // 关闭加载指示
+      if (mounted) Navigator.pop(context);
+
+      // 返回并显示消息
+      if (mounted) {
+        Navigator.pop(context, '已同步 ${workspaceFiles.length} 个文件到工作区和中转站');
+      }
+    } catch (e) {
+      // 关闭加载指示
+      if (mounted) Navigator.pop(context);
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('同步失败: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
   }
 
   @override
@@ -133,18 +221,17 @@ class _HistoryScreenState extends State<HistoryScreen> {
                             '暂无操作历史',
                             style: TextStyle(fontSize: 16, color: Colors.grey[600]),
                           ),
-
-                ],
-              ),
-            )
-          : ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: _history.length,
-              itemBuilder: (context, index) {
-                final item = _history[index];
-                return _buildHistoryItem(item);
-              },
-            ),
+                        ],
+                      ),
+                    )
+                  : ListView.builder(
+                      padding: const EdgeInsets.all(16),
+                      itemCount: _history.length,
+                      itemBuilder: (context, index) {
+                        final item = _history[index];
+                        return _buildHistoryItem(item);
+                      },
+                    ),
     );
   }
   
@@ -174,13 +261,27 @@ class _HistoryScreenState extends State<HistoryScreen> {
           )),
           Padding(
             padding: const EdgeInsets.all(16),
-            child: SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: () => _restoreHistory(item),
-                icon: const Icon(Icons.restore),
-                label: const Text('恢复'),
-              ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => _restoreHistory(item),
+                    icon: const Icon(Icons.restore),
+                    label: const Text('恢复'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: () => _syncToWorkspace(item),
+                    icon: const Icon(Icons.sync),
+                    label: const Text('同步工作区'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: Colors.blue,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         ],
