@@ -498,34 +498,49 @@ class _ParserScreenState extends State<ParserScreen> {
     );
   }
   
-  /// 构建编辑器（简化版，不使用Stack叠加）
+  /// 构建编辑器
   Widget _buildEditor() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final hasContent = _controller.text.isNotEmpty;
     
     return Scrollbar(
       controller: _scrollController,
       thumbVisibility: true,
       child: SingleChildScrollView(
         controller: _scrollController,
-        child: _controller.text.isEmpty
-            ? TextField(
-                controller: _controller,
-                maxLines: null,
-                keyboardType: TextInputType.multiline,
-                style: TextStyle(
-                  fontFamily: 'monospace',
-                  fontSize: 13,
-                  height: 1.4,
-                  color: isDark ? Colors.white : Colors.black87,
-                ),
-                decoration: const InputDecoration(
-                  hintText: '粘贴AI回复的消息到这里...',
-                  hintStyle: TextStyle(color: Colors.grey),
-                  border: InputBorder.none,
-                  contentPadding: EdgeInsets.all(12),
-                ),
-              )
-            : GestureDetector(
+        child: Stack(
+          children: [
+            // 高亮层（在后面）
+            if (hasContent)
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: _buildHighlightedText(),
+              ),
+            // 编辑层（在前面，透明文字）
+            TextField(
+              controller: _controller,
+              maxLines: null,
+              keyboardType: TextInputType.multiline,
+              style: TextStyle(
+                fontFamily: 'monospace',
+                fontSize: 13,
+                height: 1.4,
+                color: hasContent ? Colors.transparent : (isDark ? Colors.white : Colors.black87),
+              ),
+              cursorColor: Theme.of(context).colorScheme.primary,
+              decoration: const InputDecoration(
+                hintText: '粘贴AI回复的消息到这里...',
+                hintStyle: TextStyle(color: Colors.grey),
+                border: InputBorder.none,
+                contentPadding: EdgeInsets.all(12),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
                 onTap: () {
                   // 点击时显示编辑模式
                   _showEditDialog();
@@ -539,61 +554,7 @@ class _ParserScreenState extends State<ParserScreen> {
     );
   }
   
-  /// 显示编辑对话框
-  void _showEditDialog() {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      builder: (ctx) => Padding(
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.of(ctx).viewInsets.bottom,
-        ),
-        child: Container(
-          height: MediaQuery.of(ctx).size.height * 0.7,
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            children: [
-              Row(
-                children: [
-                  const Text('编辑内容', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                  const Spacer(),
-                  TextButton(
-                    onPressed: () => Navigator.pop(ctx),
-                    child: const Text('完成'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Expanded(
-                child: TextField(
-                  controller: _controller,
-                  maxLines: null,
-                  expands: true,
-                  textAlignVertical: TextAlignVertical.top,
-                  keyboardType: TextInputType.multiline,
-                  style: TextStyle(
-                    fontFamily: 'monospace',
-                    fontSize: 13,
-                    height: 1.4,
-                    color: Theme.of(context).brightness == Brightness.dark 
-                        ? Colors.white 
-                        : Colors.black87,
-                  ),
-                  decoration: const InputDecoration(
-                    border: OutlineInputBorder(),
-                    contentPadding: EdgeInsets.all(12),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
   
-  /// 构建高亮文本
   Widget _buildHighlightedText() {
     final text = _controller.text;
     if (text.isEmpty) {
