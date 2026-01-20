@@ -31,6 +31,9 @@ class _ParserScreenState extends State<ParserScreen> {
   
   // 输入控制器（用于空状态时的输入）
   final TextEditingController _inputController = TextEditingController();
+  
+  // 防止重复触发
+  bool _isParsingText = false;
 
   @override
   void initState() {
@@ -44,6 +47,7 @@ class _ParserScreenState extends State<ParserScreen> {
     _inputController.dispose();
     _scrollController.dispose();
     for (final seg in _segments) {
+      seg.controller.removeListener(seg.listener);
       seg.controller.dispose();
     }
     super.dispose();
@@ -51,6 +55,7 @@ class _ParserScreenState extends State<ParserScreen> {
 
   /// 当输入框内容变化时，检测是否有 [FILESISU] 标记
   void _onInputChanged() {
+    if (_isParsingText) return;
     final text = _inputController.text;
     if (_hasFileMarker(text)) {
       _parseTextIntoSegments(text);
@@ -64,8 +69,11 @@ class _ParserScreenState extends State<ParserScreen> {
 
   /// 将文本解析为分段
   void _parseTextIntoSegments(String text) {
-    // 清理旧的控制器
+    _isParsingText = true;
+    
+    // 清理旧的控制器和监听器
     for (final seg in _segments) {
+      seg.controller.removeListener(seg.listener);
       seg.controller.dispose();
     }
     _segments.clear();
@@ -76,6 +84,7 @@ class _ParserScreenState extends State<ParserScreen> {
     final matches = pattern.allMatches(text).toList();
 
     if (matches.isEmpty) {
+      _isParsingText = false;
       setState(() {
         _markerCount = 0;
         _currentMarkerIndex = 0;
@@ -92,11 +101,7 @@ class _ParserScreenState extends State<ParserScreen> {
       if (match.start > lastEnd) {
         final beforeText = text.substring(lastEnd, match.start);
         if (beforeText.trim().isNotEmpty) {
-          _segments.add(_TextSegment(
-            text: beforeText,
-            hasMarker: false,
-            markerIndex: -1,
-          ));
+          _addSegment(beforeText, hasMarker: false, markerIndex: -1);
         }
       }
 
@@ -105,29 +110,38 @@ class _ParserScreenState extends State<ParserScreen> {
       final segmentText = text.substring(match.start, segmentEnd);
       
       _anchorKeys.add(GlobalKey());
-      _segments.add(_TextSegment(
-        text: segmentText,
-        hasMarker: true,
-        markerIndex: i,
-      ));
+      _addSegment(segmentText, hasMarker: true, markerIndex: i);
 
       lastEnd = segmentEnd;
     }
 
-    // 先移除监听器，避免 clear 触发重复调用
-    _inputController.removeListener(_onInputChanged);
+    // 清空输入控制器
     _inputController.clear();
-    _inputController.addListener(_onInputChanged);
+    
+    _isParsingText = false;
 
     setState(() {
       _markerCount = matches.length;
-      // 安全的 clamp：确保 _markerCount > 0
       _currentMarkerIndex = _markerCount > 0 
           ? _currentMarkerIndex.clamp(0, _markerCount - 1) 
           : 0;
     });
   }
 
+  /// 添加分段并设置监听器
+  void _addSegment(String text, {required bool hasMarker, required int markerIndex}) {
+    final segment = _TextSegment(
+      text: text,
+      hasMarker: hasMarker,
+      markerIndex: markerIndex,
+    );
+    // 监听分段内容变化，触发重建以更新高亮
+    segment.listener = () {
+      if (mounted) setState(() {});
+    };
+    segment.controller.addListener(segment.listener);
+    _segments.add(segment);
+  }
 
   /// 获取完整文本（用于解析）
   String _getFullText() {
@@ -139,7 +153,7 @@ class _ParserScreenState extends State<ParserScreen> {
 
   /// 跳转到第一个标记
   void _goToFirst() {
-    if (_markerCount == 0) return;
+    if (_markerCount == 0 || _currentMarkerIndex == 0) return;
     _currentMarkerIndex = 0;
     _scrollToCurrentMarker();
   }
@@ -160,7 +174,7 @@ class _ParserScreenState extends State<ParserScreen> {
 
   /// 跳转到最后一个标记
   void _goToLast() {
-    if (_markerCount == 0) return;
+    if (_markerCount == 0 || _currentMarkerIndex == _markerCount - 1) return;
     _currentMarkerIndex = _markerCount - 1;
     _scrollToCurrentMarker(alignBottom: true);
   }
@@ -169,16 +183,16 @@ class _ParserScreenState extends State<ParserScreen> {
   void _scrollToCurrentMarker({bool alignBottom = false}) {
     setState(() {});
 
-    // 找到对应的锚点 key
     if (_currentMarkerIndex < 0 || _currentMarkerIndex >= _anchorKeys.length) return;
     
     final key = _anchorKeys[_currentMarkerIndex];
-    final context = key.currentContext;
-    if (context == null) return;
-
+    
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ctx = key.currentContext;
+      if (ctx == null) return;
+      
       Scrollable.ensureVisible(
-        context,
+        ctx,
         alignment: alignBottom ? 1.0 : 0.0,
         duration: Duration.zero,
       );
@@ -308,12 +322,17 @@ class _ParserScreenState extends State<ParserScreen> {
 
   /// 清空所有内容
   void _clearAll() {
+    _isParsingText = true;
+    
     for (final seg in _segments) {
+      seg.controller.removeListener(seg.listener);
       seg.controller.dispose();
     }
     _segments.clear();
     _anchorKeys.clear();
     _inputController.clear();
+    
+    _isParsingText = false;
 
     setState(() {
       _markerCount = 0;
@@ -605,9 +624,9 @@ class _ParserScreenState extends State<ParserScreen> {
         itemBuilder: (context, index) {
           final segment = _segments[index];
 
-          // 带标记的段落用 key 包裹整个内容区域（用于定位）
           Widget content = _buildSegmentTextField(segment, isDark);
           
+          // 带标记的段落用 key 包裹（用于滚动定位）
           if (segment.hasMarker && segment.markerIndex >= 0 && segment.markerIndex < _anchorKeys.length) {
             content = Container(
               key: _anchorKeys[segment.markerIndex],
@@ -623,50 +642,43 @@ class _ParserScreenState extends State<ParserScreen> {
 
   /// 构建单个分段的文本框
   Widget _buildSegmentTextField(_TextSegment segment, bool isDark) {
+    // 直接从 controller 获取最新文本
     final text = segment.controller.text;
     final hasContent = text.isNotEmpty;
 
-    // 不使用 Stack 叠加，改用更简单的方案：
-    // 直接让 TextField 显示文本，只对 [FILESISU] 行做特殊处理
-    // 由于 TextField 不支持富文本，我们用 TextField.buildCounter 无法实现
-    // 改用：TextField 透明 + RichText 对齐
-    
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        return Stack(
-          children: [
-            // 高亮层（底层，决定显示内容）
-            if (hasContent)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: _buildHighlightedText(text, isDark),
-              ),
-            // 编辑层（顶层，透明文字，接收输入）
-            TextField(
-              controller: segment.controller,
-              maxLines: null,
-              keyboardType: TextInputType.multiline,
-              style: TextStyle(
-                fontFamily: 'monospace',
-                fontSize: 13,
-                height: 1.4,
-                color: hasContent ? Colors.transparent : (isDark ? Colors.white : Colors.black87),
-              ),
-              cursorColor: Theme.of(context).colorScheme.primary,
-              decoration: InputDecoration(
-                border: InputBorder.none,
-                isDense: true,
-                contentPadding: const EdgeInsets.symmetric(vertical: 4),
-                hintText: hasContent ? null : '...',
-                hintStyle: TextStyle(color: Colors.grey[500]),
-              ),
-            ),
-          ],
-        );
-      },
+    // 使用 Column 让高亮文本和透明 TextField 完全重叠
+    // TextField 在上层接收输入，高亮文本在下层显示
+    return Stack(
+      children: [
+        // 高亮层（底层显示）
+        if (hasContent)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: _buildHighlightedText(text, isDark),
+          ),
+        // 编辑层（顶层接收输入，文字透明）
+        TextField(
+          controller: segment.controller,
+          maxLines: null,
+          keyboardType: TextInputType.multiline,
+          style: TextStyle(
+            fontFamily: 'monospace',
+            fontSize: 13,
+            height: 1.4,
+            color: hasContent ? Colors.transparent : (isDark ? Colors.white : Colors.black87),
+          ),
+          cursorColor: Theme.of(context).colorScheme.primary,
+          decoration: InputDecoration(
+            border: InputBorder.none,
+            isDense: true,
+            contentPadding: const EdgeInsets.symmetric(vertical: 6),
+            hintText: hasContent ? null : '...',
+            hintStyle: TextStyle(color: Colors.grey[500]),
+          ),
+        ),
+      ],
     );
   }
-
 
   /// 高亮显示文本
   Widget _buildHighlightedText(String text, bool isDark) {
@@ -676,7 +688,6 @@ class _ParserScreenState extends State<ParserScreen> {
     int lastEnd = 0;
 
     for (final match in pattern.allMatches(text)) {
-      // 匹配前的普通文本
       if (match.start > lastEnd) {
         spans.add(TextSpan(
           text: text.substring(lastEnd, match.start),
@@ -684,7 +695,6 @@ class _ParserScreenState extends State<ParserScreen> {
         ));
       }
 
-      // 高亮的 [FILESISU] 行
       spans.add(TextSpan(
         text: text.substring(match.start, match.end),
         style: const TextStyle(
@@ -697,7 +707,6 @@ class _ParserScreenState extends State<ParserScreen> {
       lastEnd = match.end;
     }
 
-    // 剩余文本
     if (lastEnd < text.length) {
       spans.add(TextSpan(
         text: text.substring(lastEnd),
@@ -714,10 +723,9 @@ class _ParserScreenState extends State<ParserScreen> {
         ),
         children: spans,
       ),
+      softWrap: true,
     );
   }
-
-
 
   Widget _buildTypeIcon(OperationType type) {
     final (icon, color) = switch (type) {
@@ -738,6 +746,7 @@ class _TextSegment {
   final TextEditingController controller;
   final bool hasMarker;
   final int markerIndex;
+  late VoidCallback listener;
 
   _TextSegment({
     required String text,
