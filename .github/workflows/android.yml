@@ -16,7 +16,13 @@ jobs:
   build:
     runs-on: ubuntu-latest
     
+    # 授予删除 artifacts 的权限
+    permissions:
+      actions: write
+      contents: read
+    
     steps:
+
       - name: Checkout code
         uses: actions/checkout@v4
       
