@@ -114,14 +114,20 @@ class _ParserScreenState extends State<ParserScreen> {
       lastEnd = segmentEnd;
     }
 
+    // 先移除监听器，避免 clear 触发重复调用
+    _inputController.removeListener(_onInputChanged);
+    _inputController.clear();
+    _inputController.addListener(_onInputChanged);
+
     setState(() {
       _markerCount = matches.length;
-      _currentMarkerIndex = _currentMarkerIndex.clamp(0, _markerCount - 1);
+      // 安全的 clamp：确保 _markerCount > 0
+      _currentMarkerIndex = _markerCount > 0 
+          ? _currentMarkerIndex.clamp(0, _markerCount - 1) 
+          : 0;
     });
-
-    // 清空输入控制器（内容已转移到分段）
-    _inputController.clear();
   }
+
 
   /// 获取完整文本（用于解析）
   String _getFullText() {
@@ -620,39 +626,47 @@ class _ParserScreenState extends State<ParserScreen> {
     final text = segment.controller.text;
     final hasContent = text.isNotEmpty;
 
-    // 使用 IntrinsicHeight 让 Stack 根据子元素确定高度
-    return IntrinsicHeight(
-      child: Stack(
-        children: [
-          // 编辑层（决定 Stack 大小）
-          TextField(
-            controller: segment.controller,
-            maxLines: null,
-            keyboardType: TextInputType.multiline,
-            style: TextStyle(
-              fontFamily: 'monospace',
-              fontSize: 13,
-              height: 1.4,
-              color: hasContent ? Colors.transparent : (isDark ? Colors.white : Colors.black87),
-            ),
-            cursorColor: Theme.of(context).colorScheme.primary,
-            decoration: const InputDecoration(
-              border: InputBorder.none,
-              isDense: true,
-              contentPadding: EdgeInsets.zero,
-            ),
-          ),
-          // 高亮层（覆盖在上面，但不接收事件）
-          if (hasContent)
-            Positioned.fill(
-              child: IgnorePointer(
+    // 不使用 Stack 叠加，改用更简单的方案：
+    // 直接让 TextField 显示文本，只对 [FILESISU] 行做特殊处理
+    // 由于 TextField 不支持富文本，我们用 TextField.buildCounter 无法实现
+    // 改用：TextField 透明 + RichText 对齐
+    
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return Stack(
+          children: [
+            // 高亮层（底层，决定显示内容）
+            if (hasContent)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
                 child: _buildHighlightedText(text, isDark),
               ),
+            // 编辑层（顶层，透明文字，接收输入）
+            TextField(
+              controller: segment.controller,
+              maxLines: null,
+              keyboardType: TextInputType.multiline,
+              style: TextStyle(
+                fontFamily: 'monospace',
+                fontSize: 13,
+                height: 1.4,
+                color: hasContent ? Colors.transparent : (isDark ? Colors.white : Colors.black87),
+              ),
+              cursorColor: Theme.of(context).colorScheme.primary,
+              decoration: InputDecoration(
+                border: InputBorder.none,
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(vertical: 4),
+                hintText: hasContent ? null : '...',
+                hintStyle: TextStyle(color: Colors.grey[500]),
+              ),
             ),
-        ],
-      ),
+          ],
+        );
+      },
     );
   }
+
 
   /// 高亮显示文本
   Widget _buildHighlightedText(String text, bool isDark) {
@@ -691,8 +705,8 @@ class _ParserScreenState extends State<ParserScreen> {
       ));
     }
 
-    return RichText(
-      text: TextSpan(
+    return Text.rich(
+      TextSpan(
         style: const TextStyle(
           fontFamily: 'monospace',
           fontSize: 13,
@@ -702,6 +716,7 @@ class _ParserScreenState extends State<ParserScreen> {
       ),
     );
   }
+
 
 
   Widget _buildTypeIcon(OperationType type) {
