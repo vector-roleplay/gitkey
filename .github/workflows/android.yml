@@ -225,9 +225,44 @@ jobs:
             flutter build apk --debug --target-platform android-arm64
           fi
       
+      # 清理旧的 artifacts，只保留最近 9 个（上传新的后变成 10 个）
+      - name: Clean old artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "Fetching artifacts..."
+          
+          # 获取所有 artifacts
+          artifacts=$(gh api repos/${{ github.repository }}/actions/artifacts \
+            --jq '.artifacts | sort_by(.created_at) | reverse | .[].id')
+          
+          # 转换为数组
+          artifact_ids=($artifacts)
+          count=${#artifact_ids[@]}
+          
+          echo "Found $count artifacts"
+          
+          # 如果超过 9 个，删除多余的（保留 9 个，加上即将上传的 1 个 = 10 个）
+          if [ "$count" -gt 9 ]; then
+            echo "Cleaning up old artifacts..."
+            
+            # 从第 10 个开始删除
+            for ((i=9; i<count; i++)); do
+              id=${artifact_ids[$i]}
+              echo "Deleting artifact ID: $id"
+              gh api -X DELETE repos/${{ github.repository }}/actions/artifacts/$id || true
+            done
+            
+            echo "Cleanup complete!"
+          else
+            echo "No cleanup needed"
+          fi
+      
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: app-${{ github.event.inputs.build_type }}
           path: build/app/outputs/flutter-apk/*.apk
+          retention-days: 30
+
 
