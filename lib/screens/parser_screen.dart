@@ -540,22 +540,9 @@ class _ParserScreenState extends State<ParserScreen> {
       ),
     );
   }
-
-                onTap: () {
-                  // 点击时显示编辑模式
-                  _showEditDialog();
-                },
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: _buildHighlightedText(),
-                ),
-              ),
-      ),
-    );
-  }
-  
   
   Widget _buildHighlightedText() {
+
     final text = _controller.text;
     if (text.isEmpty) {
       return const SizedBox.shrink();
