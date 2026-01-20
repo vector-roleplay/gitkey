@@ -599,22 +599,17 @@ class _ParserScreenState extends State<ParserScreen> {
         itemBuilder: (context, index) {
           final segment = _segments[index];
 
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // 隐藏锚点（只有带标记的段落才有）
-              if (segment.hasMarker && segment.markerIndex >= 0 && segment.markerIndex < _anchorKeys.length)
-                SizedBox(
-                  key: _anchorKeys[segment.markerIndex],
-                  height: 0,
-                  width: 0,
-                ),
+          // 带标记的段落用 key 包裹整个内容区域（用于定位）
+          Widget content = _buildSegmentTextField(segment, isDark);
+          
+          if (segment.hasMarker && segment.markerIndex >= 0 && segment.markerIndex < _anchorKeys.length) {
+            content = Container(
+              key: _anchorKeys[segment.markerIndex],
+              child: content,
+            );
+          }
 
-              // 文本内容
-              _buildSegmentTextField(segment, isDark),
-            ],
-          );
+          return content;
         },
       ),
     );
@@ -625,34 +620,37 @@ class _ParserScreenState extends State<ParserScreen> {
     final text = segment.controller.text;
     final hasContent = text.isNotEmpty;
 
-    return Stack(
-      children: [
-        // 高亮层
-        if (hasContent)
-          Positioned.fill(
-            child: IgnorePointer(
-              child: _buildHighlightedText(text, isDark),
+    // 使用 IntrinsicHeight 让 Stack 根据子元素确定高度
+    return IntrinsicHeight(
+      child: Stack(
+        children: [
+          // 编辑层（决定 Stack 大小）
+          TextField(
+            controller: segment.controller,
+            maxLines: null,
+            keyboardType: TextInputType.multiline,
+            style: TextStyle(
+              fontFamily: 'monospace',
+              fontSize: 13,
+              height: 1.4,
+              color: hasContent ? Colors.transparent : (isDark ? Colors.white : Colors.black87),
+            ),
+            cursorColor: Theme.of(context).colorScheme.primary,
+            decoration: const InputDecoration(
+              border: InputBorder.none,
+              isDense: true,
+              contentPadding: EdgeInsets.zero,
             ),
           ),
-        // 编辑层
-        TextField(
-          controller: segment.controller,
-          maxLines: null,
-          keyboardType: TextInputType.multiline,
-          style: TextStyle(
-            fontFamily: 'monospace',
-            fontSize: 13,
-            height: 1.4,
-            color: hasContent ? Colors.transparent : (isDark ? Colors.white : Colors.black87),
-          ),
-          cursorColor: Theme.of(context).colorScheme.primary,
-          decoration: const InputDecoration(
-            border: InputBorder.none,
-            isDense: true,
-            contentPadding: EdgeInsets.zero,
-          ),
-        ),
-      ],
+          // 高亮层（覆盖在上面，但不接收事件）
+          if (hasContent)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: _buildHighlightedText(text, isDark),
+              ),
+            ),
+        ],
+      ),
     );
   }
 
@@ -704,6 +702,7 @@ class _ParserScreenState extends State<ParserScreen> {
       ),
     );
   }
+
 
   Widget _buildTypeIcon(OperationType type) {
     final (icon, color) = switch (type) {
