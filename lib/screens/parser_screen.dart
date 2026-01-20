@@ -508,40 +508,50 @@ class _ParserScreenState extends State<ParserScreen> {
       thumbVisibility: true,
       child: SingleChildScrollView(
         controller: _scrollController,
-        child: Stack(
-          children: [
-            // 高亮层（在后面）
-            if (hasContent)
-              Padding(
-                padding: const EdgeInsets.all(12),
-                child: _buildHighlightedText(),
-              ),
-            // 编辑层（在前面，透明文字）
-            TextField(
-              controller: _controller,
-              maxLines: null,
-              keyboardType: TextInputType.multiline,
-              style: TextStyle(
-                fontFamily: 'monospace',
-                fontSize: 13,
-                height: 1.4,
-                color: hasContent ? Colors.transparent : (isDark ? Colors.white : Colors.black87),
-              ),
-              cursorColor: Theme.of(context).colorScheme.primary,
-              decoration: const InputDecoration(
-                hintText: '粘贴AI回复的消息到这里...',
-                hintStyle: TextStyle(color: Colors.grey),
-                border: InputBorder.none,
-                contentPadding: EdgeInsets.all(12),
-              ),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            minHeight: 200, // 最小高度
+          ),
+          child: IntrinsicHeight(
+            child: Stack(
+              children: [
+                // 高亮层（在后面）
+                if (hasContent)
+                  Positioned.fill(
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: _buildHighlightedText(),
+                    ),
+                  ),
+                // 编辑层（在前面，透明文字）
+                TextField(
+                  controller: _controller,
+                  maxLines: null,
+                  keyboardType: TextInputType.multiline,
+                  style: TextStyle(
+                    fontFamily: 'monospace',
+                    fontSize: 13,
+                    height: 1.4,
+                    color: hasContent ? Colors.transparent : (isDark ? Colors.white : Colors.black87),
+                  ),
+                  cursorColor: Theme.of(context).colorScheme.primary,
+                  decoration: const InputDecoration(
+                    hintText: '粘贴AI回复的消息到这里...',
+                    hintStyle: TextStyle(color: Colors.grey),
+                    border: InputBorder.none,
+                    contentPadding: EdgeInsets.all(12),
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
   }
   
   Widget _buildHighlightedText() {
+
 
     final text = _controller.text;
     if (text.isEmpty) {
