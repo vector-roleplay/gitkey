@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 import '../main.dart';
 import '../models.dart';
 import '../services/parser_service.dart';
@@ -16,8 +17,13 @@ class ParserScreen extends StatefulWidget {
 class _ParserScreenState extends State<ParserScreen> {
   // 分段数据
   List<_TextSegment> _segments = [];
-  final List<GlobalKey> _anchorKeys = [];
-  final ScrollController _scrollController = ScrollController();
+  
+  // 记录每个带标记段落在 _segments 中的索引
+  List<int> _markerSegmentIndices = [];
+  
+  // 滚动控制器
+  final ItemScrollController _itemScrollController = ItemScrollController();
+  final ItemPositionsListener _itemPositionsListener = ItemPositionsListener.create();
   
   // 当前定位
   int _currentMarkerIndex = 0;
@@ -45,7 +51,6 @@ class _ParserScreenState extends State<ParserScreen> {
   void dispose() {
     _inputController.removeListener(_onInputChanged);
     _inputController.dispose();
-    _scrollController.dispose();
     for (final seg in _segments) {
       seg.controller.removeListener(seg.listener);
       seg.controller.dispose();
@@ -77,7 +82,7 @@ class _ParserScreenState extends State<ParserScreen> {
       seg.controller.dispose();
     }
     _segments.clear();
-    _anchorKeys.clear();
+    _markerSegmentIndices.clear();
 
     // 找到所有 [FILESISU] 的位置
     final pattern = RegExp(r'\[FILESISU\]', caseSensitive: false);
@@ -94,6 +99,8 @@ class _ParserScreenState extends State<ParserScreen> {
 
     // 按 [FILESISU] 位置分割文本
     int lastEnd = 0;
+    int markerIndex = 0;
+    
     for (int i = 0; i < matches.length; i++) {
       final match = matches[i];
       
@@ -109,8 +116,10 @@ class _ParserScreenState extends State<ParserScreen> {
       final segmentEnd = (i + 1 < matches.length) ? matches[i + 1].start : text.length;
       final segmentText = text.substring(match.start, segmentEnd);
       
-      _anchorKeys.add(GlobalKey());
-      _addSegment(segmentText, hasMarker: true, markerIndex: i);
+      // 记录这个带标记段落在 _segments 中的索引
+      _markerSegmentIndices.add(_segments.length);
+      _addSegment(segmentText, hasMarker: true, markerIndex: markerIndex);
+      markerIndex++;
 
       lastEnd = segmentEnd;
     }
@@ -183,20 +192,27 @@ class _ParserScreenState extends State<ParserScreen> {
   void _scrollToCurrentMarker({bool alignBottom = false}) {
     setState(() {});
 
-    if (_currentMarkerIndex < 0 || _currentMarkerIndex >= _anchorKeys.length) return;
+    if (_currentMarkerIndex < 0 || _currentMarkerIndex >= _markerSegmentIndices.length) return;
+    if (!_itemScrollController.isAttached) return;
     
-    final key = _anchorKeys[_currentMarkerIndex];
+    final segmentIndex = _markerSegmentIndices[_currentMarkerIndex];
     
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final ctx = key.currentContext;
-      if (ctx == null) return;
-      
-      Scrollable.ensureVisible(
-        ctx,
-        alignment: alignBottom ? 1.0 : 0.0,
-        duration: Duration.zero,
-      );
-    });
+    if (alignBottom) {
+      // 跳到最后：先跳到目标，再跳到物理底部
+      _itemScrollController.jumpTo(index: segmentIndex, alignment: 0.0);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _itemScrollController.scrollToEnd();
+      });
+    } else if (_currentMarkerIndex == 0) {
+      // 跳到第一个：先跳到目标，再跳到物理顶部
+      _itemScrollController.jumpTo(index: segmentIndex, alignment: 0.0);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _itemScrollController.scrollToStart();
+      });
+    } else {
+      // 普通跳转：顶边对齐
+      _itemScrollController.jumpTo(index: segmentIndex, alignment: 0.0);
+    }
   }
 
   /// 解析内容
@@ -329,7 +345,7 @@ class _ParserScreenState extends State<ParserScreen> {
       seg.controller.dispose();
     }
     _segments.clear();
-    _anchorKeys.clear();
+    _markerSegmentIndices.clear();
     _inputController.clear();
     
     _isParsingText = false;
@@ -368,7 +384,7 @@ class _ParserScreenState extends State<ParserScreen> {
           if (hasMarkers)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.5),
+              color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
               child: Row(
                 children: [
                   Container(
@@ -614,40 +630,23 @@ class _ParserScreenState extends State<ParserScreen> {
   Widget _buildSegmentedEditor() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    return Scrollbar(
-      controller: _scrollController,
-      thumbVisibility: true,
-      child: ListView.builder(
-        controller: _scrollController,
-        padding: const EdgeInsets.all(12),
-        itemCount: _segments.length,
-        itemBuilder: (context, index) {
-          final segment = _segments[index];
-
-          Widget content = _buildSegmentTextField(segment, isDark);
-          
-          // 带标记的段落用 key 包裹（用于滚动定位）
-          if (segment.hasMarker && segment.markerIndex >= 0 && segment.markerIndex < _anchorKeys.length) {
-            content = Container(
-              key: _anchorKeys[segment.markerIndex],
-              child: content,
-            );
-          }
-
-          return content;
-        },
-      ),
+    return ScrollablePositionedList.builder(
+      itemCount: _segments.length,
+      itemScrollController: _itemScrollController,
+      itemPositionsListener: _itemPositionsListener,
+      padding: const EdgeInsets.all(12),
+      itemBuilder: (context, index) {
+        final segment = _segments[index];
+        return _buildSegmentTextField(segment, isDark);
+      },
     );
   }
 
   /// 构建单个分段的文本框
   Widget _buildSegmentTextField(_TextSegment segment, bool isDark) {
-    // 直接从 controller 获取最新文本
     final text = segment.controller.text;
     final hasContent = text.isNotEmpty;
 
-    // 使用 Column 让高亮文本和透明 TextField 完全重叠
-    // TextField 在上层接收输入，高亮文本在下层显示
     return Stack(
       children: [
         // 高亮层（底层显示）
