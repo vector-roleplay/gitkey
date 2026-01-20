@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
+import '../third_party/scrollable_positioned_list/lib/scrollable_positioned_list.dart';
 import '../main.dart';
+
 import '../models.dart';
 import '../services/parser_service.dart';
 import '../services/github_service.dart';
