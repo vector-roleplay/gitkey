@@ -51,14 +51,26 @@ class _ParserScreenState extends State<ParserScreen> {
   
   // 状态标记
   bool _hasPasted = false;  // 是否已粘贴内容
+  bool _hasInput = false;   // 粘贴区是否有内容
   
   @override
   void initState() {
     super.initState();
+    _pasteController.addListener(_onPasteTextChanged);
+  }
+  
+  void _onPasteTextChanged() {
+    final hasInput = _pasteController.text.isNotEmpty;
+    if (hasInput != _hasInput) {
+      setState(() {
+        _hasInput = hasInput;
+      });
+    }
   }
   
   @override
   void dispose() {
+    _pasteController.removeListener(_onPasteTextChanged);
     _pasteController.dispose();
     _blockController?.dispose();
     _blockScrollController.dispose();
@@ -312,6 +324,7 @@ class _ParserScreenState extends State<ParserScreen> {
       _blocks = [];
       _currentBlockIndex = 0;
       _hasPasted = false;
+      _hasInput = false;
       _instructions = [];
       _selectedIndices = {};
       _errors = [];
@@ -320,12 +333,15 @@ class _ParserScreenState extends State<ParserScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // 计算是否显示指令列表
+    final showInstructions = _instructions.isNotEmpty;
+    
     return Scaffold(
       resizeToAvoidBottomInset: true,
       appBar: AppBar(
         title: const Text('解析AI消息'),
         actions: [
-          if (_hasPasted)
+          if (_hasPasted || _hasInput)
             IconButton(
               icon: const Icon(Icons.clear),
               tooltip: '清空',
@@ -335,9 +351,9 @@ class _ParserScreenState extends State<ParserScreen> {
       ),
       body: Column(
         children: [
-          // 主内容区
+          // 主内容区 - 根据是否有指令调整布局
           Expanded(
-            flex: 2,
+            flex: showInstructions ? 1 : 2,  // 有指令时缩小
             child: _hasPasted ? _buildBlockViewer() : _buildPasteArea(),
           ),
           
@@ -374,9 +390,9 @@ class _ParserScreenState extends State<ParserScreen> {
             ),
           
           // 解析结果列表
-          if (_instructions.isNotEmpty) ...[
+          if (showInstructions) ...[
             Padding(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
               child: Row(
                 children: [
                   Text(
@@ -400,7 +416,7 @@ class _ParserScreenState extends State<ParserScreen> {
               ),
             ),
             Expanded(
-              flex: 2,
+              flex: 1,
               child: ListView.builder(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 itemCount: _instructions.length,
@@ -488,7 +504,7 @@ class _ParserScreenState extends State<ParserScreen> {
           SizedBox(
             width: double.infinity,
             child: FilledButton.icon(
-              onPressed: _pasteController.text.isNotEmpty 
+              onPressed: _hasInput 
                   ? () => _processPastedContent(_pasteController.text)
                   : null,
               icon: const Icon(Icons.content_paste),
@@ -496,23 +512,19 @@ class _ParserScreenState extends State<ParserScreen> {
             ),
           ),
           const SizedBox(height: 8),
-          // 添加实时监听
-          ListenableBuilder(
-            listenable: _pasteController,
-            builder: (context, _) {
-              if (_pasteController.text.isEmpty) {
-                return const SizedBox.shrink();
-              }
-              // 快速预览检测到的文件数
-              final count = RegExp(r'\[FILESISU\]', caseSensitive: false)
-                  .allMatches(_pasteController.text)
-                  .length;
-              return Text(
-                '检测到 $count 个文件标记',
-                style: TextStyle(color: Colors.grey[600], fontSize: 12),
-              );
-            },
-          ),
+          // 文件计数提示
+          if (_hasInput)
+            Builder(
+              builder: (context) {
+                final count = RegExp(r'\[FILESISU\]', caseSensitive: false)
+                    .allMatches(_pasteController.text)
+                    .length;
+                return Text(
+                  '检测到 $count 个文件标记',
+                  style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                );
+              },
+            ),
         ],
       ),
     );
@@ -525,6 +537,7 @@ class _ParserScreenState extends State<ParserScreen> {
     }
     
     final block = _blocks[_currentBlockIndex];
+    final showInstructions = _instructions.isNotEmpty;
     
     return Column(
       children: [
@@ -574,32 +587,34 @@ class _ParserScreenState extends State<ParserScreen> {
             ),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(8),
-              child: Scrollbar(
-                controller: _blockScrollController,
-                thumbVisibility: true,
-                child: SingleChildScrollView(
-                  controller: _blockScrollController,
-                  child: TextField(
-                    controller: _blockController,
-                    maxLines: null,
-                    keyboardType: TextInputType.multiline,
-                    style: const TextStyle(
-                      fontFamily: 'monospace',
-                      fontSize: 13,
-                      height: 1.4,
-                    ),
-                    decoration: const InputDecoration(
-                      contentPadding: EdgeInsets.all(12),
-                      border: InputBorder.none,
-                    ),
-                  ),
-                ),
-              ),
+              child: _blockController != null
+                  ? Scrollbar(
+                      controller: _blockScrollController,
+                      thumbVisibility: true,
+                      child: SingleChildScrollView(
+                        controller: _blockScrollController,
+                        child: TextField(
+                          controller: _blockController,
+                          maxLines: null,
+                          keyboardType: TextInputType.multiline,
+                          style: const TextStyle(
+                            fontFamily: 'monospace',
+                            fontSize: 13,
+                            height: 1.4,
+                          ),
+                          decoration: const InputDecoration(
+                            contentPadding: EdgeInsets.all(12),
+                            border: InputBorder.none,
+                          ),
+                        ),
+                      ),
+                    )
+                  : const Center(child: CircularProgressIndicator()),
             ),
           ),
         ),
         
-        // 导航按钮
+        // 导航按钮 - 有指令时简化显示
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
           child: Row(
@@ -635,18 +650,19 @@ class _ParserScreenState extends State<ParserScreen> {
           ),
         ),
         
-        // 解析按钮
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-          child: SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              onPressed: _parseAllBlocks,
-              icon: const Icon(Icons.code),
-              label: Text('解析全部 (${_blocks.length}个文件)'),
+        // 解析按钮 - 已解析后隐藏
+        if (!showInstructions)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _parseAllBlocks,
+                icon: const Icon(Icons.code),
+                label: Text('解析全部 (${_blocks.length}个文件)'),
+              ),
             ),
           ),
-        ),
       ],
     );
   }
