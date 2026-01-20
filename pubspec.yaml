@@ -11,8 +11,8 @@ dependencies:
     sdk: flutter
   flutter_localizations:
     sdk: flutter
-  scrollable_positioned_list:
-    path: lib/third_party/scrollable_positioned_list
+  collection: ^1.15.0
+
 
   http: any
   shared_preferences: any
