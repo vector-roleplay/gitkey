@@ -6,24 +6,6 @@ import '../services/parser_service.dart';
 import '../services/github_service.dart';
 import '../services/storage_service.dart';
 
-/// 代码块数据结构
-class CodeBlock {
-  final int index;
-  final String filePath;
-  final String rawContent;  // 包含 [FILESISU] 的原始内容
-  String editedContent;     // 用户可能编辑过的内容
-  
-  CodeBlock({
-    required this.index,
-    required this.filePath,
-    required this.rawContent,
-    String? editedContent,
-  }) : editedContent = editedContent ?? rawContent;
-  
-  /// 获取用于显示的文件名
-  String get fileName => filePath.split('/').last;
-}
-
 class ParserScreen extends StatefulWidget {
   const ParserScreen({super.key});
 
@@ -32,16 +14,12 @@ class ParserScreen extends StatefulWidget {
 }
 
 class _ParserScreenState extends State<ParserScreen> {
-  // 原始输入（用于粘贴）
-  final _pasteController = TextEditingController();
+  final _controller = TextEditingController();
+  final _scrollController = ScrollController();
   
-  // 分割后的代码块
-  List<CodeBlock> _blocks = [];
-  int _currentBlockIndex = 0;
-  
-  // 当前块的编辑控制器
-  TextEditingController? _blockController;
-  final _blockScrollController = ScrollController();
+  // [FILESISU] 标记位置
+  List<int> _fileMarkerPositions = [];
+  int _currentMarkerIndex = -1;
   
   // 解析结果
   List<Instruction> _instructions = [];
@@ -49,155 +27,99 @@ class _ParserScreenState extends State<ParserScreen> {
   List<String> _errors = [];
   bool _isProcessing = false;
   
-  // 状态标记
-  bool _hasPasted = false;  // 是否已粘贴内容
-  bool _hasInput = false;   // 粘贴区是否有内容
-  
   @override
   void initState() {
     super.initState();
-    _pasteController.addListener(_onPasteTextChanged);
-  }
-  
-  void _onPasteTextChanged() {
-    final hasInput = _pasteController.text.isNotEmpty;
-    if (hasInput != _hasInput) {
-      setState(() {
-        _hasInput = hasInput;
-      });
-    }
+    _controller.addListener(_onTextChanged);
   }
   
   @override
   void dispose() {
-    _pasteController.removeListener(_onPasteTextChanged);
-    _pasteController.dispose();
-    _blockController?.dispose();
-    _blockScrollController.dispose();
+    _controller.removeListener(_onTextChanged);
+    _controller.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
   
-  /// 处理粘贴的内容，分割成块
-  void _processPastedContent(String content) {
-    if (content.trim().isEmpty) return;
-    
-    final blocks = _splitIntoBlocks(content);
-    
-    if (blocks.isEmpty) {
-      // 没有找到 [FILESISU] 标记，显示错误
-      setState(() {
-        _errors = ['未找到 [FILESISU] 文件标记'];
-        _hasPasted = false;
-      });
-      return;
-    }
+  void _onTextChanged() {
+    _updateFileMarkerPositions();
+  }
+  
+  /// 更新 [FILESISU] 标记位置
+  void _updateFileMarkerPositions() {
+    final text = _controller.text;
+    final pattern = RegExp(r'\[FILESISU\]', caseSensitive: false);
+    final matches = pattern.allMatches(text);
     
     setState(() {
-      _blocks = blocks;
-      _currentBlockIndex = 0;
-      _hasPasted = true;
-      _errors = [];
-      _instructions = [];
-      _selectedIndices = {};
-    });
-    
-    _loadCurrentBlock();
-  }
-  
-  /// 按 [FILESISU] 分割文本
-  List<CodeBlock> _splitIntoBlocks(String content) {
-    final blocks = <CodeBlock>[];
-    
-    // 匹配 [FILESISU] 及其后面的路径
-    final pattern = RegExp(
-      r'\[FILESISU\]\s*([^\n\[]+)',
-      caseSensitive: false,
-    );
-    
-    final matches = pattern.allMatches(content).toList();
-    
-    for (int i = 0; i < matches.length; i++) {
-      final match = matches[i];
-      final filePath = match.group(1)?.trim() ?? '';
-      
-      // 获取这个块的内容范围
-      final startPos = match.start;
-      final endPos = i < matches.length - 1 
-          ? matches[i + 1].start 
-          : content.length;
-      
-      final rawContent = content.substring(startPos, endPos).trim();
-      
-      blocks.add(CodeBlock(
-        index: i,
-        filePath: filePath,
-        rawContent: rawContent,
-      ));
-    }
-    
-    return blocks;
-  }
-  
-  /// 加载当前块到编辑器
-  void _loadCurrentBlock() {
-    if (_blocks.isEmpty) return;
-    
-    final block = _blocks[_currentBlockIndex];
-    
-    _blockController?.dispose();
-    _blockController = TextEditingController(text: block.editedContent);
-    
-    // 滚动到顶部
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_blockScrollController.hasClients) {
-        _blockScrollController.jumpTo(0);
+      _fileMarkerPositions = matches.map((m) => m.start).toList();
+      if (_fileMarkerPositions.isEmpty) {
+        _currentMarkerIndex = -1;
       }
     });
+  }
+  
+  /// 跳转到第一个标记
+  void _goToFirst() {
+    if (_fileMarkerPositions.isEmpty) return;
+    _currentMarkerIndex = 0;
+    _jumpToMarker(_fileMarkerPositions.first);
+  }
+  
+  /// 跳转到上一个标记
+  void _goToPrevious() {
+    if (_fileMarkerPositions.isEmpty) return;
+    if (_currentMarkerIndex <= 0) {
+      _currentMarkerIndex = 0;
+    } else {
+      _currentMarkerIndex--;
+    }
+    _jumpToMarker(_fileMarkerPositions[_currentMarkerIndex]);
+  }
+  
+  /// 跳转到下一个标记
+  void _goToNext() {
+    if (_fileMarkerPositions.isEmpty) return;
+    if (_currentMarkerIndex >= _fileMarkerPositions.length - 1) {
+      _currentMarkerIndex = _fileMarkerPositions.length - 1;
+    } else {
+      _currentMarkerIndex++;
+    }
+    _jumpToMarker(_fileMarkerPositions[_currentMarkerIndex]);
+  }
+  
+  /// 跳转到最后一个标记
+  void _goToLast() {
+    if (_fileMarkerPositions.isEmpty) return;
+    _currentMarkerIndex = _fileMarkerPositions.length - 1;
+    _jumpToMarker(_fileMarkerPositions.last);
+  }
+  
+  /// 跳转到指定位置
+  void _jumpToMarker(int position) {
+    // 设置光标位置
+    _controller.selection = TextSelection.collapsed(offset: position);
+    
+    // 计算滚动位置（估算）
+    final text = _controller.text.substring(0, position);
+    final lineCount = '\n'.allMatches(text).length;
+    final estimatedOffset = lineCount * 20.0; // 每行约20像素
+    
+    if (_scrollController.hasClients) {
+      _scrollController.animateTo(
+        estimatedOffset.clamp(0, _scrollController.position.maxScrollExtent),
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
+    }
     
     setState(() {});
   }
   
-  /// 保存当前块的编辑内容
-  void _saveCurrentBlock() {
-    if (_blocks.isEmpty || _blockController == null) return;
-    _blocks[_currentBlockIndex].editedContent = _blockController!.text;
-  }
-  
-  /// 导航到指定块
-  void _navigateToBlock(int index) {
-    if (index < 0 || index >= _blocks.length) return;
-    if (index == _currentBlockIndex) return;
-    
-    _saveCurrentBlock();
-    
-    setState(() {
-      _currentBlockIndex = index;
-    });
-    
-    _loadCurrentBlock();
-  }
-  
-  /// 到第一个块
-  void _goToFirst() => _navigateToBlock(0);
-  
-  /// 到上一个块
-  void _goToPrevious() => _navigateToBlock(_currentBlockIndex - 1);
-  
-  /// 到下一个块
-  void _goToNext() => _navigateToBlock(_currentBlockIndex + 1);
-  
-  /// 到最后一个块
-  void _goToLast() => _navigateToBlock(_blocks.length - 1);
-  
-  /// 解析所有块
-  void _parseAllBlocks() {
-    _saveCurrentBlock();
-    
-    // 合并所有块的内容
-    final fullContent = _blocks.map((b) => b.editedContent).join('\n\n');
-    
+  /// 解析内容
+  void _parseContent() {
     final parser = context.read<ParserService>();
-    final result = parser.parse(fullContent);
+    final result = parser.parse(_controller.text);
     
     setState(() {
       _instructions = result.instructions;
@@ -316,15 +238,10 @@ class _ParserScreenState extends State<ParserScreen> {
   
   /// 清空所有内容
   void _clearAll() {
-    _pasteController.clear();
-    _blockController?.dispose();
-    _blockController = null;
-    
+    _controller.clear();
     setState(() {
-      _blocks = [];
-      _currentBlockIndex = 0;
-      _hasPasted = false;
-      _hasInput = false;
+      _fileMarkerPositions = [];
+      _currentMarkerIndex = -1;
       _instructions = [];
       _selectedIndices = {};
       _errors = [];
@@ -333,7 +250,8 @@ class _ParserScreenState extends State<ParserScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // 计算是否显示指令列表
+    final hasContent = _controller.text.isNotEmpty;
+    final hasMarkers = _fileMarkerPositions.isNotEmpty;
     final showInstructions = _instructions.isNotEmpty;
     
     return Scaffold(
@@ -341,7 +259,7 @@ class _ParserScreenState extends State<ParserScreen> {
       appBar: AppBar(
         title: const Text('解析AI消息'),
         actions: [
-          if (_hasPasted || _hasInput)
+          if (hasContent)
             IconButton(
               icon: const Icon(Icons.clear),
               tooltip: '清空',
@@ -351,10 +269,101 @@ class _ParserScreenState extends State<ParserScreen> {
       ),
       body: Column(
         children: [
-          // 主内容区 - 根据是否有指令调整布局
+          // 文件标记计数
+          if (hasMarkers)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.5),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.primary,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      '${_currentMarkerIndex >= 0 ? _currentMarkerIndex + 1 : 0}/${_fileMarkerPositions.length}',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    '个文件标记',
+                    style: TextStyle(color: Colors.grey[600], fontSize: 14),
+                  ),
+                ],
+              ),
+            ),
+          
+          // 主编辑区
           Expanded(
-            flex: showInstructions ? 1 : 2,  // 有指令时缩小
-            child: _hasPasted ? _buildBlockViewer() : _buildPasteArea(),
+            flex: showInstructions ? 1 : 2,
+            child: Container(
+              margin: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.grey.withOpacity(0.3)),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Row(
+                  children: [
+                    // 代码编辑区
+                    Expanded(
+                      child: Scrollbar(
+                        controller: _scrollController,
+                        thumbVisibility: true,
+                        child: _buildHighlightedTextField(),
+                      ),
+                    ),
+                    // 右侧快捷按钮
+                    if (hasMarkers)
+                      Container(
+                        width: 40,
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.3),
+                          border: Border(
+                            left: BorderSide(color: Colors.grey.withOpacity(0.3)),
+                          ),
+                        ),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            _buildSideButton(
+                              icon: Icons.keyboard_double_arrow_up,
+                              tooltip: '第一个',
+                              onPressed: _currentMarkerIndex > 0 ? _goToFirst : null,
+                            ),
+                            const SizedBox(height: 8),
+                            _buildSideButton(
+                              icon: Icons.keyboard_arrow_up,
+                              tooltip: '上一个',
+                              onPressed: _currentMarkerIndex > 0 ? _goToPrevious : null,
+                            ),
+                            const SizedBox(height: 16),
+                            _buildSideButton(
+                              icon: Icons.keyboard_arrow_down,
+                              tooltip: '下一个',
+                              onPressed: _currentMarkerIndex < _fileMarkerPositions.length - 1 ? _goToNext : null,
+                            ),
+                            const SizedBox(height: 8),
+                            _buildSideButton(
+                              icon: Icons.keyboard_double_arrow_down,
+                              tooltip: '最后一个',
+                              onPressed: _currentMarkerIndex < _fileMarkerPositions.length - 1 ? _goToLast : null,
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
           ),
           
           // 错误显示
@@ -451,7 +460,6 @@ class _ParserScreenState extends State<ParserScreen> {
                 },
               ),
             ),
-            
             Padding(
               padding: const EdgeInsets.all(16),
               child: SizedBox(
@@ -469,285 +477,143 @@ class _ParserScreenState extends State<ParserScreen> {
                 ),
               ),
             ),
+          ] else ...[
+            // 解析按钮
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: hasMarkers ? _parseContent : null,
+                  icon: const Icon(Icons.code),
+                  label: Text(hasMarkers 
+                    ? '解析 (${_fileMarkerPositions.length}个文件)' 
+                    : '粘贴AI消息后点击解析'),
+                ),
+              ),
+            ),
           ],
         ],
       ),
     );
   }
   
-  /// 构建粘贴区域（初始状态）
-  Widget _buildPasteArea() {
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        children: [
-          Expanded(
-            child: TextField(
-              controller: _pasteController,
-              maxLines: null,
-              expands: true,
-              textAlignVertical: TextAlignVertical.top,
-              keyboardType: TextInputType.multiline,
-              style: const TextStyle(
-                fontFamily: 'monospace',
-                fontSize: 13,
-                height: 1.4,
-              ),
-              decoration: const InputDecoration(
-                hintText: '粘贴AI回复的消息到这里...\n\n支持包含多个 [FILESISU] 的长消息',
-                border: OutlineInputBorder(),
-                contentPadding: EdgeInsets.all(12),
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              onPressed: _hasInput 
-                  ? () => _processPastedContent(_pasteController.text)
-                  : null,
-              icon: const Icon(Icons.content_paste),
-              label: const Text('处理粘贴内容'),
-            ),
-          ),
-          const SizedBox(height: 8),
-          // 文件计数提示
-          if (_hasInput)
-            Builder(
-              builder: (context) {
-                final count = RegExp(r'\[FILESISU\]', caseSensitive: false)
-                    .allMatches(_pasteController.text)
-                    .length;
-                return Text(
-                  '检测到 $count 个文件标记',
-                  style: TextStyle(color: Colors.grey[600], fontSize: 12),
-                );
-              },
-            ),
-        ],
-      ),
-    );
-  }
-  
-  /// 构建块查看器（分块显示）
-  Widget _buildBlockViewer() {
-    if (_blocks.isEmpty) {
-      return const Center(child: Text('无内容'));
-    }
-    
-    final block = _blocks[_currentBlockIndex];
-    final showInstructions = _instructions.isNotEmpty;
-    
-    return Column(
+  /// 构建带高亮的文本编辑器
+  Widget _buildHighlightedTextField() {
+    return Stack(
       children: [
-        // 块信息栏
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.5),
-          child: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.primary,
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Text(
-                  '${_currentBlockIndex + 1}/${_blocks.length}',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 12,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  block.filePath,
-                  style: const TextStyle(
-                    fontFamily: 'monospace',
-                    fontWeight: FontWeight.w500,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
+        // 高亮层
+        SingleChildScrollView(
+          controller: _scrollController,
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: _buildHighlightedText(),
           ),
         ),
-        
-        // 代码块内容
-        Expanded(
-          child: Container(
-            margin: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-            decoration: BoxDecoration(
-              border: Border.all(color: Colors.grey.withOpacity(0.3)),
-              borderRadius: BorderRadius.circular(8),
+        // 透明编辑层
+        Positioned.fill(
+          child: TextField(
+            controller: _controller,
+            scrollController: _scrollController,
+            maxLines: null,
+            expands: true,
+            textAlignVertical: TextAlignVertical.top,
+            keyboardType: TextInputType.multiline,
+            style: const TextStyle(
+              fontFamily: 'monospace',
+              fontSize: 13,
+              height: 1.4,
+              color: Colors.transparent,
             ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: _blockController != null
-                  ? Scrollbar(
-                      controller: _blockScrollController,
-                      thumbVisibility: true,
-                      child: SingleChildScrollView(
-                        controller: _blockScrollController,
-                        child: TextField(
-                          controller: _blockController,
-                          maxLines: null,
-                          keyboardType: TextInputType.multiline,
-                          style: const TextStyle(
-                            fontFamily: 'monospace',
-                            fontSize: 13,
-                            height: 1.4,
-                          ),
-                          decoration: const InputDecoration(
-                            contentPadding: EdgeInsets.all(12),
-                            border: InputBorder.none,
-                          ),
-                        ),
-                      ),
-                    )
-                  : const Center(child: CircularProgressIndicator()),
+            cursorColor: Theme.of(context).colorScheme.primary,
+            decoration: const InputDecoration(
+              hintText: '粘贴AI回复的消息到这里...',
+              hintStyle: TextStyle(color: Colors.grey),
+              border: InputBorder.none,
+              contentPadding: EdgeInsets.all(12),
             ),
           ),
         ),
-        
-        // 导航按钮 - 有指令时简化显示
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-          child: Row(
-            children: [
-              _buildNavButton(
-                icon: Icons.first_page,
-                tooltip: '第一个文件',
-                onPressed: _currentBlockIndex > 0 ? _goToFirst : null,
-              ),
-              const SizedBox(width: 8),
-              _buildNavButton(
-                icon: Icons.chevron_left,
-                tooltip: '上一个文件',
-                onPressed: _currentBlockIndex > 0 ? _goToPrevious : null,
-              ),
-              Expanded(
-                child: Center(
-                  child: _buildFileSelector(),
-                ),
-              ),
-              _buildNavButton(
-                icon: Icons.chevron_right,
-                tooltip: '下一个文件',
-                onPressed: _currentBlockIndex < _blocks.length - 1 ? _goToNext : null,
-              ),
-              const SizedBox(width: 8),
-              _buildNavButton(
-                icon: Icons.last_page,
-                tooltip: '最后一个文件',
-                onPressed: _currentBlockIndex < _blocks.length - 1 ? _goToLast : null,
-              ),
-            ],
-          ),
-        ),
-        
-        // 解析按钮 - 已解析后隐藏
-        if (!showInstructions)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-            child: SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                onPressed: _parseAllBlocks,
-                icon: const Icon(Icons.code),
-                label: Text('解析全部 (${_blocks.length}个文件)'),
-              ),
-            ),
-          ),
       ],
     );
   }
   
-  /// 构建文件选择下拉
-  Widget _buildFileSelector() {
-    return PopupMenuButton<int>(
-      onSelected: _navigateToBlock,
-      itemBuilder: (context) => List.generate(_blocks.length, (index) {
-        final block = _blocks[index];
-        final isCurrent = index == _currentBlockIndex;
-        
-        return PopupMenuItem(
-          value: index,
-          child: Row(
-            children: [
-              SizedBox(
-                width: 24,
-                child: Text(
-                  '${index + 1}',
-                  style: TextStyle(
-                    color: isCurrent ? Theme.of(context).colorScheme.primary : Colors.grey,
-                    fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  block.fileName,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
-                  ),
-                ),
-              ),
-              if (isCurrent)
-                Icon(Icons.check, size: 18, color: Theme.of(context).colorScheme.primary),
-            ],
+  /// 构建高亮文本
+  Widget _buildHighlightedText() {
+    final text = _controller.text;
+    if (text.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    
+    final pattern = RegExp(r'\[FILESISU\][^\n]*', caseSensitive: false);
+    final spans = <TextSpan>[];
+    int lastEnd = 0;
+    
+    for (final match in pattern.allMatches(text)) {
+      // 匹配前的普通文本
+      if (match.start > lastEnd) {
+        spans.add(TextSpan(
+          text: text.substring(lastEnd, match.start),
+          style: TextStyle(
+            color: Theme.of(context).brightness == Brightness.dark 
+                ? Colors.white 
+                : Colors.black87,
           ),
-        );
-      }),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surfaceVariant,
-          borderRadius: BorderRadius.circular(16),
+        ));
+      }
+      
+      // 高亮的 [FILESISU] 行
+      spans.add(TextSpan(
+        text: text.substring(match.start, match.end),
+        style: const TextStyle(
+          color: Colors.cyan,
+          fontWeight: FontWeight.bold,
+          backgroundColor: Color(0x2000BCD4),
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.list, size: 16),
-            const SizedBox(width: 4),
-            Text(
-              '选择文件',
-              style: TextStyle(
-                fontSize: 12,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-            ),
-            const Icon(Icons.arrow_drop_down, size: 16),
-          ],
+      ));
+      
+      lastEnd = match.end;
+    }
+    
+    // 剩余文本
+    if (lastEnd < text.length) {
+      spans.add(TextSpan(
+        text: text.substring(lastEnd),
+        style: TextStyle(
+          color: Theme.of(context).brightness == Brightness.dark 
+              ? Colors.white 
+              : Colors.black87,
         ),
+      ));
+    }
+    
+    return RichText(
+      text: TextSpan(
+        style: const TextStyle(
+          fontFamily: 'monospace',
+          fontSize: 13,
+          height: 1.4,
+        ),
+        children: spans,
       ),
     );
   }
   
-  Widget _buildNavButton({
+  Widget _buildSideButton({
     required IconData icon,
     required String tooltip,
     required VoidCallback? onPressed,
   }) {
-    return SizedBox(
-      width: 48,
-      height: 40,
-      child: IconButton(
-        icon: Icon(icon),
-        tooltip: tooltip,
-        onPressed: onPressed,
-        style: IconButton.styleFrom(
-          backgroundColor: onPressed != null 
-              ? Theme.of(context).colorScheme.surfaceVariant
-              : Colors.grey.withOpacity(0.2),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        ),
+    return IconButton(
+      icon: Icon(icon, size: 20),
+      tooltip: tooltip,
+      onPressed: onPressed,
+      padding: const EdgeInsets.all(8),
+      constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+      style: IconButton.styleFrom(
+        backgroundColor: onPressed != null 
+            ? Theme.of(context).colorScheme.primary.withOpacity(0.1)
+            : Colors.transparent,
       ),
     );
   }
