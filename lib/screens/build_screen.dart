@@ -89,18 +89,30 @@ class _BuildScreenState extends State<BuildScreen> with WidgetsBindingObserver {
     } else if (state == AppLifecycleState.resumed) {
       // 应用回到前台
       _stopBackgroundService();
-      _checkBackgroundResult();
-      
-      // 如果还在构建中，重新启动前台轮询
-      if (appState.hasBuildInProgress) {
-        _startPolling();
-        _startTicking();
-      }
+      _handleAppResumed();
     }
   }
 
-  /// 启动后台服务
-  Future<void> _startBackgroundService() async {
+  /// 处理应用恢复到前台
+  Future<void> _handleAppResumed() async {
+    final appState = context.read<AppState>();
+    
+    // 先等待后台结果检查完成
+    await _checkBackgroundResult();
+    
+    // 如果后台已经下载完成，不需要重新轮询
+    if (appState.downloadedApkPath != null) {
+      return;
+    }
+    
+    // 如果还在构建中，重新启动前台轮询
+    if (appState.hasBuildInProgress) {
+      _startPolling();
+      _startTicking();
+    }
+  }
+
+
     final appState = context.read<AppState>();
     final storage = context.read<StorageService>();
     final token = storage.getToken();
@@ -453,13 +465,20 @@ class _BuildScreenState extends State<BuildScreen> with WidgetsBindingObserver {
         _stopTicking();
         
         if (result.run!.isSuccess) {
-          _autoDownloadAndInstall();
+          // 检查是否已经下载过（后台下载完成的情况）
+          if (appState.downloadedApkPath != null) {
+            // 已有 APK，直接打开安装
+            await OpenFilex.open(appState.downloadedApkPath!);
+          } else {
+            _autoDownloadAndInstall();
+          }
         } else {
           setState(() {
             _errorMessage = '构建失败: ${result.run!.conclusion}';
           });
         }
       }
+
     } else if (result.error != null) {
       setState(() => _errorMessage = result.error);
     }
@@ -468,11 +487,18 @@ class _BuildScreenState extends State<BuildScreen> with WidgetsBindingObserver {
   Future<void> _autoDownloadAndInstall() async {
     final appState = context.read<AppState>();
     
+    // 如果已经有下载好的 APK，直接打开安装
+    if (appState.downloadedApkPath != null) {
+      await OpenFilex.open(appState.downloadedApkPath!);
+      return;
+    }
+    
     if (appState.buildRunId == null || _selectedRepo == null) return;
     
     appState.updateDownloadState(isDownloading: true, progress: 0);
 
     final github = context.read<GitHubService>();
+
 
     // 1. 获取 artifacts
     final artifactsResult = await github.getArtifacts(
