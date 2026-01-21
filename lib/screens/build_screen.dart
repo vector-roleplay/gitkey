@@ -162,6 +162,10 @@ class _BuildScreenState extends State<BuildScreen> {
       workflowId: _selectedWorkflow!.fileName,
     );
 
+    // 校准时钟偏差
+    if (result.serverTime != null) {
+      appState.updateClockOffset(result.serverTime!);
+    }
 
     if (result.run != null && result.run!.isRunning) {
       // 有正在进行的构建，更新全局状态
@@ -177,6 +181,7 @@ class _BuildScreenState extends State<BuildScreen> {
     }
   }
 
+
   /// 格式化已用时间
   String _formatDuration(Duration duration) {
     final minutes = duration.inMinutes;
@@ -188,19 +193,24 @@ class _BuildScreenState extends State<BuildScreen> {
     }
   }
 
-  /// 更新已用时间显示
+  /// 更新已用时间显示（使用校准后的时间，与服务器同步）
   void _updateElapsedTime() {
     final appState = context.read<AppState>();
     final startTime = appState.buildStartTime;
     if (startTime != null) {
-      final elapsed = DateTime.now().difference(startTime);
+      // 使用校准后的当前时间，确保与服务器同步
+      final calibratedNow = appState.calibratedNow;
+      final elapsed = calibratedNow.difference(startTime);
+      // 确保不会显示负数（网络延迟可能导致短暂的负值）
+      final safeElapsed = elapsed.isNegative ? Duration.zero : elapsed;
       if (mounted) {
         setState(() {
-          _elapsedTime = _formatDuration(elapsed);
+          _elapsedTime = _formatDuration(safeElapsed);
         });
       }
     }
   }
+
 
   /// 开始计时
   void _startTicking() {
@@ -309,6 +319,10 @@ class _BuildScreenState extends State<BuildScreen> {
       workflowId: _selectedWorkflow!.fileName,
     );
 
+    // 每次轮询都校准时钟偏差，保持与服务器时间同步
+    if (result.serverTime != null) {
+      appState.updateClockOffset(result.serverTime!);
+    }
 
     if (result.run != null) {
       // 更新全局状态
@@ -346,6 +360,7 @@ class _BuildScreenState extends State<BuildScreen> {
       setState(() => _errorMessage = result.error);
     }
   }
+
 
   /// 自动下载并安装 APK
   Future<void> _autoDownloadAndInstall() async {
