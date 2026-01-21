@@ -230,9 +230,10 @@ class BuildTaskHandler extends TaskHandler {
   bool _isDownloading = false;
 
   @override
-  void onStart(DateTime timestamp, TaskStarter starter) {
-    _initFromPrefs();
+  Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
+    await _initFromPrefs();
   }
+
   
   Future<void> _initFromPrefs() async {
     // 从 SharedPreferences 读取构建信息
@@ -453,9 +454,10 @@ class BuildTaskHandler extends TaskHandler {
   }
 
   @override
-  void onDestroy(DateTime timestamp, bool isTimeout) {
+  Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {
     // 清理
   }
+
 
 
   @override
