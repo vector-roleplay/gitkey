@@ -91,10 +91,10 @@ jobs:
             archive: any
             open_filex: any
             background_downloader: any
+            flutter_local_notifications: any
+            flutter_foreground_task: any
           
           dev_dependencies:
-
-
             flutter_test:
               sdk: flutter
             flutter_lints: any
@@ -102,6 +102,7 @@ jobs:
           flutter:
             uses-material-design: true
           EOF
+
           
       - name: Add permissions
         run: |
