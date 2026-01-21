@@ -230,9 +230,14 @@ class BuildTaskHandler extends TaskHandler {
   bool _isDownloading = false;
 
   @override
-  Future<void> onStart(DateTime timestamp) async {
+  void onStart(DateTime timestamp, TaskStarter starter) {
+    _initFromPrefs();
+  }
+  
+  Future<void> _initFromPrefs() async {
     // 从 SharedPreferences 读取构建信息
     final prefs = await SharedPreferences.getInstance();
+
     _token = prefs.getString('bg_build_token');
     _owner = prefs.getString('bg_build_owner');
     _repo = prefs.getString('bg_build_repo');
@@ -248,6 +253,12 @@ class BuildTaskHandler extends TaskHandler {
   void onRepeatEvent(DateTime timestamp) {
     _doRepeatEvent();
   }
+  
+  @override
+  void onReceiveData(Object data) {
+    // 接收主线程数据（暂不使用）
+  }
+
   
   Future<void> _doRepeatEvent() async {
     final prefs = await SharedPreferences.getInstance();
@@ -442,9 +453,10 @@ class BuildTaskHandler extends TaskHandler {
   }
 
   @override
-  Future<void> onDestroy(DateTime timestamp) async {
+  void onDestroy(DateTime timestamp, bool isTimeout) {
     // 清理
   }
+
 
   @override
   void onNotificationButtonPressed(String id) {
