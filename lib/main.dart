@@ -189,7 +189,10 @@ class AppState extends ChangeNotifier {
   void setSelectedRepo(Repository? repo) {
     _selectedRepo = repo;
     notifyListeners();
-  }void setWorkspaceMode(bool enabled) {
+  }
+  
+  void setWorkspaceMode(bool enabled) {
+
     _useWorkspaceMode = enabled;
     notifyListeners();
   }
