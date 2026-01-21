@@ -271,7 +271,28 @@ class GitHubService {
     required String owner,
     required String repo,
     required int runId,
-  }) async {/// 取消 workflow 运行
+  }) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$_baseUrl/repos/$owner/$repo/actions/runs/$runId/artifacts'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 15));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final list = (data['artifacts'] as List)
+            .map((e) => Artifact.fromJson(e))
+            .toList();
+        return (artifacts: list, error: null);
+      } else {
+        return (artifacts: <Artifact>[], error: 'HTTP ${response.statusCode}');
+      }
+    } catch (e) {
+      return (artifacts: <Artifact>[], error: e.toString());
+    }
+  }
+
+  /// 取消 workflow 运行
   Future<({bool success, String? error})> cancelWorkflowRun({
     required String owner,
     required String repo,
@@ -297,26 +318,6 @@ class GitHubService {
     }
   }
 
-
-    try {
-      final response = await http.get(
-        Uri.parse('$_baseUrl/repos/$owner/$repo/actions/runs/$runId/artifacts'),
-        headers: _headers,
-      ).timeout(const Duration(seconds: 15));
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        final list = (data['artifacts'] as List)
-            .map((e) => Artifact.fromJson(e))
-            .toList();
-        return (artifacts: list, error: null);
-      } else {
-        return (artifacts: <Artifact>[], error: 'HTTP ${response.statusCode}');
-      }
-    } catch (e) {
-      return (artifacts: <Artifact>[], error: e.toString());
-    }
-  }
 
   /// 下载 artifact（返回保存的文件路径）
   /// 使用流式下载，避免大文件导致内存问题
