@@ -100,13 +100,15 @@ class _BuildScreenState extends State<BuildScreen> with WidgetsBindingObserver {
     // 先等待后台结果检查完成
     await _checkBackgroundResult();
     
-    // 如果后台已经下载完成，不需要重新轮询
+    // 如果后台已经下载完成，直接打开安装
     if (appState.downloadedApkPath != null) {
+      await OpenFilex.open(appState.downloadedApkPath!);
       return;
     }
     
     // 如果还在构建中，重新启动前台轮询
     if (appState.hasBuildInProgress) {
+
       _startPolling();
       _startTicking();
     }
