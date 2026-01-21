@@ -8,6 +8,8 @@ import 'package:open_filex/open_filex.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_foreground_task/models/service_request_result.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:permission_handler/permission_handler.dart';
+
 
 import '../services/github_service.dart';
 import '../services/storage_service.dart';
@@ -50,8 +52,20 @@ class _BuildScreenState extends State<BuildScreen> with WidgetsBindingObserver {
     _loadRepos();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initBuildState();
+      _requestNotificationPermission();
     });
   }
+
+  /// 请求通知权限（Android 13+ 必需）
+  Future<void> _requestNotificationPermission() async {
+    if (Platform.isAndroid) {
+      final status = await Permission.notification.status;
+      if (!status.isGranted) {
+        await Permission.notification.request();
+      }
+    }
+  }
+
 
   @override
   void dispose() {
@@ -91,14 +105,38 @@ class _BuildScreenState extends State<BuildScreen> with WidgetsBindingObserver {
     final storage = context.read<StorageService>();
     final token = storage.getToken();
     
-    if (token == null || _selectedRepo == null || _selectedWorkflow == null) return;
+    if (token == null || _selectedRepo == null || _selectedWorkflow == null) {
+      debugPrint('后台服务启动失败: token/repo/workflow 为空');
+      return;
+    }
     
     // 只要有构建任务就启动后台服务（不再要求 buildRunId 必须存在）
-    if (!appState.hasBuildInProgress) return;
+    if (!appState.hasBuildInProgress) {
+      debugPrint('后台服务启动失败: 没有进行中的构建');
+      return;
+    }
+
+    // 检查并请求通知权限
+    if (Platform.isAndroid) {
+      final notificationStatus = await Permission.notification.status;
+      if (!notificationStatus.isGranted) {
+        debugPrint('通知权限未授予，尝试请求...');
+        final result = await Permission.notification.request();
+        if (!result.isGranted) {
+          debugPrint('通知权限被拒绝');
+        }
+      }
+    }
 
     // 停止前台轮询
     _pollTimer?.cancel();
     _tickTimer?.cancel();
+
+    debugPrint('正在启动后台服务...');
+    debugPrint('  token: ${token.substring(0, 8)}...');
+    debugPrint('  repo: ${_selectedRepo!.fullName}');
+    debugPrint('  workflow: ${_selectedWorkflow!.fileName}');
+    debugPrint('  runId: ${appState.buildRunId ?? 0}');
 
     // 返回值是 ServiceRequestResult（sealed class）
     final result = await _bgService.startBackgroundMonitor(
@@ -113,8 +151,11 @@ class _BuildScreenState extends State<BuildScreen> with WidgetsBindingObserver {
     // 使用类型匹配检查启动结果
     if (result is ServiceRequestFailure) {
       debugPrint('后台服务启动失败: ${result.error}');
+    } else {
+      debugPrint('后台服务启动成功');
     }
   }
+
 
   /// 停止后台服务
 
