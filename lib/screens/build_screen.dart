@@ -430,7 +430,60 @@ class _BuildScreenState extends State<BuildScreen> with WidgetsBindingObserver {
   void _stopPolling() {
     _pollTimer?.cancel();
     _pollTimer = null;
+  }/// 取消构建（同时取消 GitHub Actions 上的运行）
+  Future<void> _cancelBuild() async {
+    final appState = context.read<AppState>();
+    final github = context.read<GitHubService>();
+    
+    // 先停止本地轮询和后台服务
+    _stopPolling();
+    _stopTicking();
+    _stopBackgroundService();
+    
+    // 如果有正在运行的构建，尝试取消 GitHub Actions
+    if (appState.buildRunId != null && _selectedRepo != null) {
+      // 显示取消中的提示
+      setState(() {
+        _errorMessage = null;
+      });
+      
+      final result = await github.cancelWorkflowRun(
+        owner: _selectedRepo!.owner,
+        repo: _selectedRepo!.name,
+        runId: appState.buildRunId!,
+      );
+      
+      if (!result.success && result.error != null && !result.error!.contains('已完成')) {
+        // 只有在非"已完成"的错误时才显示
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('取消构建: ${result.error}'),
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        }
+      } else if (result.success) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('✅ 已取消 GitHub Actions 构建'),
+              duration: Duration(seconds: 2),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      }
+    }
+    
+    // 清理状态
+    appState.clearBuildState();
+    setState(() {
+      _elapsedTime = '';
+    });
   }
+
+
 
   Future<void> _checkBuildStatus() async {
     final github = context.read<GitHubService>();
@@ -847,17 +900,10 @@ class _BuildScreenState extends State<BuildScreen> with WidgetsBindingObserver {
                           ),
                           if (hasActiveTask)
                             TextButton(
-                              onPressed: () {
-                                _stopPolling();
-                                _stopTicking();
-                                _stopBackgroundService();
-                                context.read<AppState>().clearBuildState();
-                                setState(() {
-                                  _elapsedTime = '';
-                                });
-                              },
+                              onPressed: _cancelBuild,
                               child: const Text('取消'),
                             ),
+
                         ],
                       ),
                       if (_errorMessage != null) ...[
