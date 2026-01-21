@@ -186,6 +186,7 @@ jobs:
               compileOptions {
                   sourceCompatibility = JavaVersion.VERSION_1_8
                   targetCompatibility = JavaVersion.VERSION_1_8
+                  coreLibraryDesugaringEnabled = true
               }
 
               kotlinOptions {
@@ -207,6 +208,7 @@ jobs:
                   targetSdk = flutter.targetSdkVersion
                   versionCode = flutter.versionCode
                   versionName = flutter.versionName
+                  multiDexEnabled = true
               }
 
               buildTypes {
@@ -222,9 +224,14 @@ jobs:
           flutter {
               source = "../.."
           }
+
+          dependencies {
+              coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4'
+          }
           EOF
 
       - name: Get dependencies
+
         run: flutter pub get
       
       - name: Build APK
