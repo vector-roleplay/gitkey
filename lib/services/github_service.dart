@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:async';
+import 'dart:io';
 import 'package:http/http.dart' as http;
+
 
 class GitHubService {
   static const _baseUrl = 'https://api.github.com';
@@ -199,8 +201,8 @@ class GitHubService {
     }
   }
 
-  /// 获取最新的 workflow 运行
-  Future<({WorkflowRun? run, String? error})> getLatestWorkflowRun({
+  /// 获取最新的 workflow 运行（包含服务器时间用于校准）
+  Future<({WorkflowRun? run, DateTime? serverTime, String? error})> getLatestWorkflowRun({
     required String owner,
     required String repo,
     String? workflowId,
@@ -216,20 +218,28 @@ class GitHubService {
         headers: _headers,
       ).timeout(const Duration(seconds: 15));
 
+      // 从响应头获取服务器时间
+      DateTime? serverTime;
+      final dateHeader = response.headers['date'];
+      if (dateHeader != null) {
+        serverTime = HttpDate.parse(dateHeader);
+      }
+
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final runs = data['workflow_runs'] as List;
         if (runs.isEmpty) {
-          return (run: null, error: '没有找到构建记录');
+          return (run: null, serverTime: serverTime, error: '没有找到构建记录');
         }
-        return (run: WorkflowRun.fromJson(runs.first), error: null);
+        return (run: WorkflowRun.fromJson(runs.first), serverTime: serverTime, error: null);
       } else {
-        return (run: null, error: 'HTTP ${response.statusCode}');
+        return (run: null, serverTime: serverTime, error: 'HTTP ${response.statusCode}');
       }
     } catch (e) {
-      return (run: null, error: e.toString());
+      return (run: null, serverTime: null, error: e.toString());
     }
   }
+
 
   /// 获取 workflow 运行状态
   Future<({WorkflowRun? run, String? error})> getWorkflowRun({
