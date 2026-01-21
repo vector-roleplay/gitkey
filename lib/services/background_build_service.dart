@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:isolate';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:path_provider/path_provider.dart';
@@ -53,11 +52,11 @@ class BackgroundBuildService {
   }
 
   void _onNotificationTap(NotificationResponse response) {
-    // 点击通知时的处理，可以打开应用
+    // 点击通知时的处理
   }
 
   /// 初始化前台任务
-  Future<void> initForegroundTask() async {
+  void initForegroundTask() {
     FlutterForegroundTask.init(
       androidNotificationOptions: AndroidNotificationOptions(
         channelId: _notificationChannelId,
@@ -65,17 +64,12 @@ class BackgroundBuildService {
         channelDescription: 'APK 构建监控服务',
         channelImportance: NotificationChannelImportance.LOW,
         priority: NotificationPriority.LOW,
-        iconData: const NotificationIconData(
-          resType: ResourceType.mipmap,
-          resPrefix: ResourcePrefix.ic,
-          name: 'launcher',
-        ),
       ),
       iosNotificationOptions: const IOSNotificationOptions(),
-      foregroundTaskOptions: const ForegroundTaskOptions(
-        interval: 5000, // 5秒轮询
-        isOnceEvent: false,
+      foregroundTaskOptions: ForegroundTaskOptions(
+        eventAction: ForegroundTaskEventAction.repeat(5000), // 5秒轮询
         autoRunOnBoot: false,
+        autoRunOnMyPackageReplaced: false,
         allowWakeLock: true,
         allowWifiLock: true,
       ),
@@ -83,7 +77,7 @@ class BackgroundBuildService {
   }
 
   /// 开始后台监控构建
-  Future<bool> startBackgroundMonitor({
+  Future<ServiceRequestResult> startBackgroundMonitor({
     required String token,
     required String owner,
     required String repo,
@@ -92,7 +86,7 @@ class BackgroundBuildService {
     required DateTime startTime,
   }) async {
     await init();
-    await initForegroundTask();
+    initForegroundTask();
 
     // 保存构建信息到 SharedPreferences，供后台任务读取
     final prefs = await SharedPreferences.getInstance();
@@ -113,7 +107,7 @@ class BackgroundBuildService {
   }
 
   /// 停止后台监控
-  Future<bool> stopBackgroundMonitor() async {
+  Future<ServiceRequestResult> stopBackgroundMonitor() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('bg_build_active', false);
     
@@ -236,7 +230,7 @@ class BuildTaskHandler extends TaskHandler {
   bool _isDownloading = false;
 
   @override
-  Future<void> onStart(DateTime timestamp, SendPort? sendPort) async {
+  Future<void> onStart(DateTime timestamp) async {
     // 从 SharedPreferences 读取构建信息
     final prefs = await SharedPreferences.getInstance();
     _token = prefs.getString('bg_build_token');
@@ -251,7 +245,11 @@ class BuildTaskHandler extends TaskHandler {
   }
 
   @override
-  Future<void> onRepeatEvent(DateTime timestamp, SendPort? sendPort) async {
+  void onRepeatEvent(DateTime timestamp) {
+    _doRepeatEvent();
+  }
+  
+  Future<void> _doRepeatEvent() async {
     final prefs = await SharedPreferences.getInstance();
     final isActive = prefs.getBool('bg_build_active') ?? false;
     
@@ -299,7 +297,7 @@ class BuildTaskHandler extends TaskHandler {
           final conclusion = run['conclusion'] as String?;
           final runId = run['id'] as int;
 
-          // 更新 runId（可能是新触发的构建）
+          // 更新 runId
           if (_runId == null || runId >= _runId!) {
             _runId = runId;
             await prefs.setInt('bg_build_run_id', runId);
@@ -315,17 +313,13 @@ class BuildTaskHandler extends TaskHandler {
 
           if (status == 'completed') {
             if (conclusion == 'success') {
-              // 构建成功，开始下载
               await _downloadAndInstall(prefs);
             } else {
-              // 构建失败
               FlutterForegroundTask.updateService(
                 notificationTitle: '❌ 构建失败',
                 notificationText: '结论: $conclusion',
               );
               await prefs.setBool('bg_build_active', false);
-              
-              // 延迟停止服务，让用户看到通知
               await Future.delayed(const Duration(seconds: 3));
               FlutterForegroundTask.stopService();
             }
@@ -431,7 +425,6 @@ class BuildTaskHandler extends TaskHandler {
       // 5. 自动打开安装程序
       await OpenFilex.open(apkPath);
 
-      // 延迟停止服务
       await Future.delayed(const Duration(seconds: 2));
       FlutterForegroundTask.stopService();
 
@@ -449,18 +442,22 @@ class BuildTaskHandler extends TaskHandler {
   }
 
   @override
-  Future<void> onDestroy(DateTime timestamp, SendPort? sendPort) async {
+  Future<void> onDestroy(DateTime timestamp) async {
     // 清理
   }
 
   @override
-  void onButtonPressed(String id) {
+  void onNotificationButtonPressed(String id) {
     // 通知按钮点击
   }
 
   @override
   void onNotificationPressed() {
-    // 点击通知，可以发送消息给主 isolate
     FlutterForegroundTask.launchApp();
+  }
+
+  @override
+  void onNotificationDismissed() {
+    // 通知被清除
   }
 }
