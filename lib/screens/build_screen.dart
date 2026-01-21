@@ -5,8 +5,11 @@ import 'package:provider/provider.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:archive/archive.dart';
 import 'package:open_filex/open_filex.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../services/github_service.dart';
 import '../services/storage_service.dart';
+import '../services/background_build_service.dart';
 import '../models.dart';
 import '../main.dart';
 
@@ -17,7 +20,7 @@ class BuildScreen extends StatefulWidget {
   State<BuildScreen> createState() => _BuildScreenState();
 }
 
-class _BuildScreenState extends State<BuildScreen> {
+class _BuildScreenState extends State<BuildScreen> with WidgetsBindingObserver {
   List<Repository> _repos = [];
   Repository? _selectedRepo;
   String _buildType = 'release';
@@ -30,15 +33,18 @@ class _BuildScreenState extends State<BuildScreen> {
   // 状态
   bool _isTriggering = false;
   String? _errorMessage;
-
   
   Timer? _pollTimer;
   Timer? _tickTimer;
   String _elapsedTime = '';
+  
+  // 后台服务
+  final _bgService = BackgroundBuildService.instance;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadRepos();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initBuildState();
@@ -47,9 +53,89 @@ class _BuildScreenState extends State<BuildScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _pollTimer?.cancel();
     _tickTimer?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    
+    final appState = context.read<AppState>();
+    
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+      // 应用进入后台
+      if (appState.hasBuildInProgress) {
+        _startBackgroundService();
+      }
+    } else if (state == AppLifecycleState.resumed) {
+      // 应用回到前台
+      _stopBackgroundService();
+      _checkBackgroundResult();
+      
+      // 如果还在构建中，重新启动前台轮询
+      if (appState.hasBuildInProgress) {
+        _startPolling();
+        _startTicking();
+      }
+    }
+  }
+
+  /// 启动后台服务
+  Future<void> _startBackgroundService() async {
+    final appState = context.read<AppState>();
+    final storage = context.read<StorageService>();
+    final token = storage.getToken();
+    
+    if (token == null || _selectedRepo == null || _selectedWorkflow == null) return;
+    if (appState.buildRunId == null) return;
+
+    // 停止前台轮询
+    _pollTimer?.cancel();
+    _tickTimer?.cancel();
+
+    await _bgService.startBackgroundMonitor(
+      token: token,
+      owner: _selectedRepo!.owner,
+      repo: _selectedRepo!.name,
+      workflowId: _selectedWorkflow!.fileName,
+      runId: appState.buildRunId!,
+      startTime: appState.buildStartTime ?? DateTime.now(),
+    );
+  }
+
+  /// 停止后台服务
+  Future<void> _stopBackgroundService() async {
+    await _bgService.stopBackgroundMonitor();
+  }
+
+  /// 检查后台任务结果
+  Future<void> _checkBackgroundResult() async {
+    final prefs = await SharedPreferences.getInstance();
+    final completed = prefs.getBool('bg_build_completed') ?? false;
+    
+    if (completed) {
+      final apkPath = prefs.getString('bg_build_apk_path');
+      final appState = context.read<AppState>();
+      
+      if (apkPath != null) {
+        appState.updateDownloadState(
+          isDownloading: false,
+          progress: 1.0,
+          apkPath: apkPath,
+        );
+        appState.updateBuildState(
+          status: 'completed',
+          conclusion: 'success',
+        );
+      }
+      
+      // 清理标记
+      await prefs.remove('bg_build_completed');
+      await prefs.remove('bg_build_apk_path');
+    }
   }
 
   void _loadRepos() {
@@ -59,13 +145,11 @@ class _BuildScreenState extends State<BuildScreen> {
       _selectedRepo = storage.getDefaultRepository();
     });
     
-    // 如果有默认仓库，自动加载其 workflows
     if (_selectedRepo != null) {
       _loadWorkflows(_selectedRepo!);
     }
   }
 
-  /// 加载仓库的 workflows
   Future<void> _loadWorkflows(Repository repo) async {
     setState(() {
       _isLoadingWorkflows = true;
@@ -96,13 +180,10 @@ class _BuildScreenState extends State<BuildScreen> {
       return;
     }
 
-    // 自动选择 workflow
     WorkflowInfo? selected;
     if (result.workflows.length == 1) {
-      // 只有一个，直接用
       selected = result.workflows.first;
     } else {
-      // 多个时，优先选包含 android/build/apk 关键词的
       final keywords = ['android', 'build', 'apk', 'flutter'];
       for (final keyword in keywords) {
         selected = result.workflows.firstWhere(
@@ -125,31 +206,27 @@ class _BuildScreenState extends State<BuildScreen> {
     });
   }
 
-
-  /// 初始化构建状态（从全局状态恢复，或检查现有构建）
   Future<void> _initBuildState() async {
     final appState = context.read<AppState>();
     
-    // 如果全局状态中有构建信息，直接恢复
+    // 先检查后台任务结果
+    await _checkBackgroundResult();
+    
     if (appState.hasBuildInProgress || appState.isBuildSuccess) {
-      // 恢复计时
       if (appState.buildStartTime != null) {
         _startTicking();
       }
-      // 如果正在构建中，恢复轮询
       if (appState.hasBuildInProgress) {
         _startPolling();
       }
       return;
     }
     
-    // 否则检查是否有正在进行的构建
-    if (_selectedRepo != null) {
+    if (_selectedRepo != null && _selectedWorkflow != null) {
       await _checkExistingBuild();
     }
   }
 
-  /// 检查是否有正在进行的构建
   Future<void> _checkExistingBuild() async {
     if (_selectedRepo == null || _selectedWorkflow == null) return;
     
@@ -162,13 +239,11 @@ class _BuildScreenState extends State<BuildScreen> {
       workflowId: _selectedWorkflow!.fileName,
     );
 
-    // 校准时钟偏差
     if (result.serverTime != null) {
       appState.updateClockOffset(result.serverTime!);
     }
 
     if (result.run != null && result.run!.isRunning) {
-      // 有正在进行的构建，更新全局状态
       appState.updateBuildState(
         runId: result.run!.id,
         status: result.run!.status,
@@ -181,8 +256,6 @@ class _BuildScreenState extends State<BuildScreen> {
     }
   }
 
-
-  /// 格式化已用时间
   String _formatDuration(Duration duration) {
     final minutes = duration.inMinutes;
     final seconds = duration.inSeconds % 60;
@@ -193,15 +266,12 @@ class _BuildScreenState extends State<BuildScreen> {
     }
   }
 
-  /// 更新已用时间显示（使用校准后的时间，与服务器同步）
   void _updateElapsedTime() {
     final appState = context.read<AppState>();
     final startTime = appState.buildStartTime;
     if (startTime != null) {
-      // 使用校准后的当前时间，确保与服务器同步
       final calibratedNow = appState.calibratedNow;
       final elapsed = calibratedNow.difference(startTime);
-      // 确保不会显示负数（网络延迟可能导致短暂的负值）
       final safeElapsed = elapsed.isNegative ? Duration.zero : elapsed;
       if (mounted) {
         setState(() {
@@ -211,8 +281,6 @@ class _BuildScreenState extends State<BuildScreen> {
     }
   }
 
-
-  /// 开始计时
   void _startTicking() {
     _tickTimer?.cancel();
     _updateElapsedTime();
@@ -221,13 +289,11 @@ class _BuildScreenState extends State<BuildScreen> {
     });
   }
 
-  /// 停止计时
   void _stopTicking() {
     _tickTimer?.cancel();
     _tickTimer = null;
   }
 
-  /// 触发构建
   Future<void> _triggerBuild() async {
     if (_selectedRepo == null) {
       setState(() => _errorMessage = '请先选择仓库');
@@ -246,13 +312,10 @@ class _BuildScreenState extends State<BuildScreen> {
       _errorMessage = null;
     });
     
-    // 清除之前的构建状态
     appState.clearBuildState();
 
     final github = context.read<GitHubService>();
     
-    // 检查 workflow 是否需要 build_type 参数
-    // 如果不需要，就不传（避免报错）
     Map<String, String>? inputs;
     if (_selectedWorkflow!.name.toLowerCase().contains('android') ||
         _selectedWorkflow!.fileName.toLowerCase().contains('android')) {
@@ -267,19 +330,16 @@ class _BuildScreenState extends State<BuildScreen> {
       inputs: inputs,
     );
 
-
     if (result.success) {
       setState(() {
         _isTriggering = false;
       });
       
-      // 更新全局状态
       appState.updateBuildState(
         status: 'queued',
         repoFullName: _selectedRepo!.fullName,
       );
       
-      // 等待一下再开始轮询
       await Future.delayed(const Duration(seconds: 3));
       _startPolling();
     } else {
@@ -290,23 +350,19 @@ class _BuildScreenState extends State<BuildScreen> {
     }
   }
 
-  /// 开始轮询构建状态
   void _startPolling() {
     _pollTimer?.cancel();
     _pollTimer = Timer.periodic(const Duration(seconds: 5), (timer) async {
       await _checkBuildStatus();
     });
-    // 立即检查一次
     _checkBuildStatus();
   }
 
-  /// 停止轮询
   void _stopPolling() {
     _pollTimer?.cancel();
     _pollTimer = null;
   }
 
-  /// 检查构建状态
   Future<void> _checkBuildStatus() async {
     final github = context.read<GitHubService>();
     final appState = context.read<AppState>();
@@ -319,13 +375,11 @@ class _BuildScreenState extends State<BuildScreen> {
       workflowId: _selectedWorkflow!.fileName,
     );
 
-    // 每次轮询都校准时钟偏差，保持与服务器时间同步
     if (result.serverTime != null) {
       appState.updateClockOffset(result.serverTime!);
     }
 
     if (result.run != null) {
-      // 更新全局状态
       appState.updateBuildState(
         runId: result.run!.id,
         status: result.run!.status,
@@ -333,12 +387,10 @@ class _BuildScreenState extends State<BuildScreen> {
         startTime: result.run!.startTime,
       );
       
-      // 如果刚开始执行（从 queued 变为 in_progress），开始计时
       if (result.run!.isInProgress && appState.buildStartTime == null) {
         appState.updateBuildState(startTime: result.run!.startTime);
       }
       
-      // 如果有开始时间且计时器没启动，启动计时器
       if (appState.buildStartTime != null && _tickTimer == null) {
         _startTicking();
       }
@@ -348,7 +400,6 @@ class _BuildScreenState extends State<BuildScreen> {
         _stopTicking();
         
         if (result.run!.isSuccess) {
-          // 构建成功，自动开始下载
           _autoDownloadAndInstall();
         } else {
           setState(() {
@@ -361,8 +412,6 @@ class _BuildScreenState extends State<BuildScreen> {
     }
   }
 
-
-  /// 自动下载并安装 APK
   Future<void> _autoDownloadAndInstall() async {
     final appState = context.read<AppState>();
     
@@ -372,7 +421,6 @@ class _BuildScreenState extends State<BuildScreen> {
 
     final github = context.read<GitHubService>();
 
-    // 1. 获取 artifacts
     final artifactsResult = await github.getArtifacts(
       owner: _selectedRepo!.owner,
       repo: _selectedRepo!.name,
@@ -389,7 +437,6 @@ class _BuildScreenState extends State<BuildScreen> {
 
     final artifact = artifactsResult.artifacts.first;
 
-    // 2. 下载 artifact
     final downloadResult = await github.downloadArtifact(
       owner: _selectedRepo!.owner,
       repo: _selectedRepo!.name,
@@ -406,13 +453,11 @@ class _BuildScreenState extends State<BuildScreen> {
 
     appState.updateDownloadState(progress: 0.5);
 
-    // 3. 保存并解压
     try {
       final tempDir = await getTemporaryDirectory();
       final zipFile = File('${tempDir.path}/artifact.zip');
       await zipFile.writeAsBytes(downloadResult.bytes!);
 
-      // 解压
       final bytes = await zipFile.readAsBytes();
       final archive = ZipDecoder().decodeBytes(bytes);
 
@@ -426,7 +471,6 @@ class _BuildScreenState extends State<BuildScreen> {
         }
       }
 
-      // 清理 zip
       await zipFile.delete();
 
       if (apkPath == null) {
@@ -443,7 +487,6 @@ class _BuildScreenState extends State<BuildScreen> {
         apkPath: apkPath,
       );
 
-      // 4. 自动打开安装程序
       await OpenFilex.open(apkPath);
       
     } catch (e) {
@@ -454,7 +497,6 @@ class _BuildScreenState extends State<BuildScreen> {
     }
   }
 
-  /// 手动安装已下载的 APK
   Future<void> _installApk() async {
     final appState = context.read<AppState>();
     final apkPath = appState.downloadedApkPath;
@@ -464,7 +506,6 @@ class _BuildScreenState extends State<BuildScreen> {
     }
   }
 
-  /// 获取状态文本
   String _getStatusText(AppState appState) {
     if (_isTriggering) return '正在触发构建...';
     
@@ -502,155 +543,302 @@ class _BuildScreenState extends State<BuildScreen> {
     final hasActiveTask = appState.hasBuildInProgress || appState.isDownloading;
     final statusText = _getStatusText(appState);
     
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('构建 APK'),
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          // 仓库选择
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('选择仓库', style: TextStyle(fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<String>(
-                    value: _selectedRepo?.fullName,
-                    decoration: const InputDecoration(
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.folder),
-                    ),
-                    items: _repos.map((r) => DropdownMenuItem(
-                      value: r.fullName,
-                      child: Text(r.fullName),
-                    )).toList(),
-                    onChanged: hasActiveTask ? null : (value) {
-                      if (value != null) {
-                        final repo = _repos.firstWhere((r) => r.fullName == value);
-                        setState(() {
-                          _selectedRepo = repo;
-                        });
-                        _loadWorkflows(repo);
-                      }
-                    },
-
-                    hint: const Text('请选择仓库'),
+    // 使用 WithForegroundTask 包装，支持后台任务
+    return WithForegroundTask(
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('构建 APK'),
+          actions: [
+            // 后台运行指示器
+            if (hasActiveTask)
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: Tooltip(
+                  message: '退出应用后将在后台继续运行',
+                  child: Icon(
+                    Icons.sync,
+                    color: Colors.green[400],
+                    size: 20,
                   ),
-                ],
-              ),
-            ),
-          ),
-          
-          // Workflow 信息显示
-          if (_isLoadingWorkflows)
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: Center(
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                    SizedBox(width: 12),
-                    Text('正在获取 workflow...'),
-                  ],
                 ),
               ),
-            )
-          else if (_selectedWorkflow != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: BoxDecoration(
-                  color: Colors.green.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.green.withOpacity(0.3)),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.check_circle, color: Colors.green, size: 18),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Workflow: ${_selectedWorkflow!.name}',
-                        style: TextStyle(color: Colors.green[700], fontSize: 13),
-                      ),
-                    ),
-                    Text(
-                      _selectedWorkflow!.fileName,
-                      style: TextStyle(color: Colors.grey[600], fontSize: 11),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          
-          const SizedBox(height: 12),
-          
-          // 构建类型
-          Card(
-
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('构建类型', style: TextStyle(fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 12),
-                  SegmentedButton<String>(
-                    segments: const [
-                      ButtonSegment(value: 'release', label: Text('Release'), icon: Icon(Icons.rocket_launch)),
-                      ButtonSegment(value: 'debug', label: Text('Debug'), icon: Icon(Icons.bug_report)),
-                    ],
-                    selected: {_buildType},
-                    onSelectionChanged: hasActiveTask ? null : (value) {
-                      setState(() => _buildType = value.first);
-                    },
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    _buildType == 'release' ? '体积小、运行快，适合日常使用' : '体积大、可调试，适合开发测试',
-                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          
-          const SizedBox(height: 12),
-          
-          // 触发构建按钮
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: SizedBox(
-              width: double.infinity,
-              height: 48,
-              child: FilledButton.icon(
-                onPressed: _isTriggering || hasActiveTask || _selectedWorkflow == null || _isLoadingWorkflows
-                    ? null 
-                    : _triggerBuild,
-                icon: _isTriggering
-                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                    : const Icon(Icons.play_arrow),
-                label: Text(_isTriggering ? '触发中...' : (hasActiveTask ? '构建中...' : '开始构建')),
-              ),
-            ),
-          ),
-
-          
-          const SizedBox(height: 16),
-          
-          // 状态显示
-          if (statusText.isNotEmpty || _errorMessage != null)
+          ],
+        ),
+        body: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            // 仓库选择
             Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('选择仓库', style: TextStyle(fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      value: _selectedRepo?.fullName,
+                      decoration: const InputDecoration(
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.folder),
+                      ),
+                      items: _repos.map((r) => DropdownMenuItem(
+                        value: r.fullName,
+                        child: Text(r.fullName),
+                      )).toList(),
+                      onChanged: hasActiveTask ? null : (value) {
+                        if (value != null) {
+                          final repo = _repos.firstWhere((r) => r.fullName == value);
+                          setState(() {
+                            _selectedRepo = repo;
+                          });
+                          _loadWorkflows(repo);
+                        }
+                      },
+                      hint: const Text('请选择仓库'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            
+            // Workflow 信息显示
+            if (_isLoadingWorkflows)
+              const Padding(
+                padding: EdgeInsets.all(16),
+                child: Center(
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                      SizedBox(width: 12),
+                      Text('正在获取 workflow...'),
+                    ],
+                  ),
+                ),
+              )
+            else if (_selectedWorkflow != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.green.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.green.withOpacity(0.3)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.check_circle, color: Colors.green, size: 18),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Workflow: ${_selectedWorkflow!.name}',
+                          style: TextStyle(color: Colors.green[700], fontSize: 13),
+                        ),
+                      ),
+                      Text(
+                        _selectedWorkflow!.fileName,
+                        style: TextStyle(color: Colors.grey[600], fontSize: 11),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            
+            const SizedBox(height: 12),
+            
+            // 构建类型
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('构建类型', style: TextStyle(fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 12),
+                    SegmentedButton<String>(
+                      segments: const [
+                        ButtonSegment(value: 'release', label: Text('Release'), icon: Icon(Icons.rocket_launch)),
+                        ButtonSegment(value: 'debug', label: Text('Debug'), icon: Icon(Icons.bug_report)),
+                      ],
+                      selected: {_buildType},
+                      onSelectionChanged: hasActiveTask ? null : (value) {
+                        setState(() => _buildType = value.first);
+                      },
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      _buildType == 'release' ? '体积小、运行快，适合日常使用' : '体积大、可调试，适合开发测试',
+                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            
+            const SizedBox(height: 12),
+            
+            // 触发构建按钮
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: FilledButton.icon(
+                  onPressed: _isTriggering || hasActiveTask || _selectedWorkflow == null || _isLoadingWorkflows
+                      ? null 
+                      : _triggerBuild,
+                  icon: _isTriggering
+                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                      : const Icon(Icons.play_arrow),
+                  label: Text(_isTriggering ? '触发中...' : (hasActiveTask ? '构建中...' : '开始构建')),
+                ),
+              ),
+            ),
+            
+            const SizedBox(height: 16),
+            
+            // 状态显示
+            if (statusText.isNotEmpty || _errorMessage != null)
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          if (hasActiveTask || appState.isDownloading)
+                            const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          if (hasActiveTask || appState.isDownloading) const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  statusText,
+                                  style: const TextStyle(fontSize: 16),
+                                ),
+                                if (appState.buildStatus == 'in_progress' && _elapsedTime.isNotEmpty)
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 4),
+                                    child: Text(
+                                      '已用时: $_elapsedTime',
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        color: Colors.grey[600],
+                                      ),
+                                    ),
+                                  ),
+                                if (appState.buildStatus == 'queued')
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 4),
+                                    child: Text(
+                                      '等待 GitHub Actions 分配运行器...',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.grey[500],
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                          if (hasActiveTask)
+                            TextButton(
+                              onPressed: () {
+                                _stopPolling();
+                                _stopTicking();
+                                _stopBackgroundService();
+                                context.read<AppState>().clearBuildState();
+                                setState(() {
+                                  _elapsedTime = '';
+                                });
+                              },
+                              child: const Text('取消'),
+                            ),
+                        ],
+                      ),
+                      if (_errorMessage != null) ...[
+                        const SizedBox(height: 8),
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.red.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.error, color: Colors.red, size: 20),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  _errorMessage!,
+                                  style: const TextStyle(color: Colors.red),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                      if (appState.isDownloading) ...[
+                        const SizedBox(height: 12),
+                        LinearProgressIndicator(value: appState.downloadProgress),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            
+            // 安装按钮
+            if (appState.downloadedApkPath != null && !appState.isDownloading) ...[
+              const SizedBox(height: 12),
+              SizedBox(
+                height: 48,
+                child: FilledButton.icon(
+                  onPressed: _installApk,
+                  icon: const Icon(Icons.install_mobile),
+                  label: const Text('安装 APK'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: Colors.green,
+                  ),
+                ),
+              ),
+            ],
+            
+            // 重新构建按钮
+            if (appState.buildStatus == 'completed' && !appState.isDownloading) ...[
+              const SizedBox(height: 12),
+              SizedBox(
+                height: 48,
+                child: OutlinedButton.icon(
+                  onPressed: () {
+                    context.read<AppState>().clearBuildState();
+                    setState(() {
+                      _errorMessage = null;
+                      _elapsedTime = '';
+                    });
+                  },
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('重新构建'),
+                ),
+              ),
+            ],
+            
+            const SizedBox(height: 24),
+            
+            // 说明
+            Card(
+              color: Colors.blue.withOpacity(0.1),
               child: Padding(
                 padding: const EdgeInsets.all(16),
                 child: Column(
@@ -658,156 +846,24 @@ class _BuildScreenState extends State<BuildScreen> {
                   children: [
                     Row(
                       children: [
-                        if (hasActiveTask || appState.isDownloading)
-                          const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          ),
-                        if (hasActiveTask || appState.isDownloading) const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                statusText,
-                                style: const TextStyle(fontSize: 16),
-                              ),
-                              // 显示已用时间（只在构建中显示，且只在实际开始后显示）
-                              if (appState.buildStatus == 'in_progress' && _elapsedTime.isNotEmpty)
-                                Padding(
-                                  padding: const EdgeInsets.only(top: 4),
-                                  child: Text(
-                                    '已用时: $_elapsedTime',
-                                    style: TextStyle(
-                                      fontSize: 13,
-                                      color: Colors.grey[600],
-                                    ),
-                                  ),
-                                ),
-                              // 排队中显示提示
-                              if (appState.buildStatus == 'queued')
-                                Padding(
-                                  padding: const EdgeInsets.only(top: 4),
-                                  child: Text(
-                                    '等待 GitHub Actions 分配运行器...',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: Colors.grey[500],
-                                    ),
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
-                        if (hasActiveTask)
-                          TextButton(
-                            onPressed: () {
-                              _stopPolling();
-                              _stopTicking();
-                              context.read<AppState>().clearBuildState();
-                              setState(() {
-                                _elapsedTime = '';
-                              });
-                            },
-                            child: const Text('取消'),
-                          ),
+                        Icon(Icons.info, color: Colors.blue[700], size: 20),
+                        const SizedBox(width: 8),
+                        Text('说明', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue[700])),
                       ],
                     ),
-                    if (_errorMessage != null) ...[
-                      const SizedBox(height: 8),
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Colors.red.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.error, color: Colors.red, size: 20),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                _errorMessage!,
-                                style: const TextStyle(color: Colors.red),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                    if (appState.isDownloading) ...[
-                      const SizedBox(height: 12),
-                      LinearProgressIndicator(value: appState.downloadProgress),
-                    ],
+                    const SizedBox(height: 8),
+                    const Text('1. 构建大约需要 3-5 分钟（有缓存时）'),
+                    const Text('2. 首次构建可能需要 8-10 分钟'),
+                    const Text('3. 计时与 GitHub 官网同步'),
+                    const Text('4. 构建完成后会自动下载并弹出安装'),
+                    const Text('5. 🆕 退出应用后会在后台继续运行'),
+                    const Text('6. 🆕 下拉通知栏可查看构建进度'),
                   ],
                 ),
               ),
             ),
-          
-          // 安装按钮（下载完成后显示）
-          if (appState.downloadedApkPath != null && !appState.isDownloading) ...[
-            const SizedBox(height: 12),
-            SizedBox(
-              height: 48,
-              child: FilledButton.icon(
-                onPressed: _installApk,
-                icon: const Icon(Icons.install_mobile),
-                label: const Text('安装 APK'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: Colors.green,
-                ),
-              ),
-            ),
           ],
-          
-          // 重新构建按钮（构建完成后显示）
-          if (appState.buildStatus == 'completed' && !appState.isDownloading) ...[
-            const SizedBox(height: 12),
-            SizedBox(
-              height: 48,
-              child: OutlinedButton.icon(
-                onPressed: () {
-                  context.read<AppState>().clearBuildState();
-                  setState(() {
-                    _errorMessage = null;
-                    _elapsedTime = '';
-                  });
-                },
-                icon: const Icon(Icons.refresh),
-                label: const Text('重新构建'),
-              ),
-            ),
-          ],
-          
-          const SizedBox(height: 24),
-          
-          // 说明
-          Card(
-            color: Colors.blue.withOpacity(0.1),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(Icons.info, color: Colors.blue[700], size: 20),
-                      const SizedBox(width: 8),
-                      Text('说明', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue[700])),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  const Text('1. 构建大约需要 3-5 分钟（有缓存时）'),
-                  const Text('2. 首次构建可能需要 8-10 分钟'),
-                  const Text('3. 计时与 GitHub 官网同步'),
-                  const Text('4. 构建完成后会自动下载并弹出安装'),
-                  const Text('5. 可以离开此页面，状态会保持'),
-                ],
-              ),
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
