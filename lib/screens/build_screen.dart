@@ -112,7 +112,8 @@ class _BuildScreenState extends State<BuildScreen> with WidgetsBindingObserver {
     }
   }
 
-
+  /// 启动后台服务
+  Future<void> _startBackgroundService() async {
     final appState = context.read<AppState>();
     final storage = context.read<StorageService>();
     final token = storage.getToken();
@@ -121,6 +122,7 @@ class _BuildScreenState extends State<BuildScreen> with WidgetsBindingObserver {
       debugPrint('后台服务启动失败: token/repo/workflow 为空');
       return;
     }
+
     
     // 只要有构建任务就启动后台服务（不再要求 buildRunId 必须存在）
     if (!appState.hasBuildInProgress) {
