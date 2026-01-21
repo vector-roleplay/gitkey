@@ -271,7 +271,33 @@ class GitHubService {
     required String owner,
     required String repo,
     required int runId,
+  }) async {/// 取消 workflow 运行
+  Future<({bool success, String? error})> cancelWorkflowRun({
+    required String owner,
+    required String repo,
+    required int runId,
   }) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$_baseUrl/repos/$owner/$repo/actions/runs/$runId/cancel'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 15));
+
+      // 202 表示成功接受取消请求
+      if (response.statusCode == 202) {
+        return (success: true, error: null);
+      } else if (response.statusCode == 409) {
+        // 409 表示 workflow 已经完成，无法取消
+        return (success: false, error: '构建已完成，无法取消');
+      } else {
+        return (success: false, error: 'HTTP ${response.statusCode}');
+      }
+    } catch (e) {
+      return (success: false, error: e.toString());
+    }
+  }
+
+
     try {
       final response = await http.get(
         Uri.parse('$_baseUrl/repos/$owner/$repo/actions/runs/$runId/artifacts'),
