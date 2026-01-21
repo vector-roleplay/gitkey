@@ -376,23 +376,57 @@ class BuildTaskHandler extends TaskHandler {
 
       final artifactId = artifacts.first['id'] as int;
 
-      // 2. 下载 artifact
+      // 2. 获取下载重定向 URL
+      FlutterForegroundTask.updateService(
+        notificationTitle: '📥 正在下载 APK',
+        notificationText: '获取下载链接...',
+      );
+
+      final downloadApiUrl = 'https://api.github.com/repos/$_owner/$_repo/actions/artifacts/$artifactId/zip';
+      final redirectRequest = http.Request('GET', Uri.parse(downloadApiUrl));
+      redirectRequest.headers.addAll({
+        'Accept': 'application/vnd.github.v3+json',
+        'Authorization': 'token $_token',
+      });
+      redirectRequest.followRedirects = false;
+
+      final redirectResponse = await redirectRequest.send().timeout(const Duration(seconds: 30));
+      
+      String? realDownloadUrl;
+      if (redirectResponse.statusCode == 302) {
+        realDownloadUrl = redirectResponse.headers['location'];
+      }
+
+      if (realDownloadUrl == null) {
+        throw Exception('获取下载链接失败');
+      }
+
+      // 3. 流式下载文件
       FlutterForegroundTask.updateService(
         notificationTitle: '📥 正在下载 APK',
         notificationText: '下载中...',
       );
 
-      final downloadUrl = 'https://api.github.com/repos/$_owner/$_repo/actions/artifacts/$artifactId/zip';
-      final downloadResponse = await http.get(
-        Uri.parse(downloadUrl),
-        headers: {
-          'Accept': 'application/vnd.github.v3+json',
-          'Authorization': 'token $_token',
-        },
-      ).timeout(const Duration(minutes: 5));
+      final tempDir = await getTemporaryDirectory();
+      final zipPath = '${tempDir.path}/artifact_${DateTime.now().millisecondsSinceEpoch}.zip';
+      final zipFile = File(zipPath);
+
+      final downloadRequest = http.Request('GET', Uri.parse(realDownloadUrl));
+      final downloadResponse = await downloadRequest.send().timeout(const Duration(seconds: 30));
 
       if (downloadResponse.statusCode != 200) {
         throw Exception('下载失败: ${downloadResponse.statusCode}');
+      }
+
+      // 边下载边写入文件
+      final sink = zipFile.openWrite();
+      try {
+        await for (final chunk in downloadResponse.stream) {
+          sink.add(chunk);
+        }
+        await sink.flush();
+      } finally {
+        await sink.close();
       }
 
       FlutterForegroundTask.updateService(
@@ -400,11 +434,7 @@ class BuildTaskHandler extends TaskHandler {
         notificationText: '处理中...',
       );
 
-      // 3. 保存并解压
-      final tempDir = await getTemporaryDirectory();
-      final zipFile = File('${tempDir.path}/artifact.zip');
-      await zipFile.writeAsBytes(downloadResponse.bodyBytes);
-
+      // 4. 解压
       final bytes = await zipFile.readAsBytes();
       final archive = ZipDecoder().decodeBytes(bytes);
 
@@ -424,7 +454,7 @@ class BuildTaskHandler extends TaskHandler {
         throw Exception('未找到 APK 文件');
       }
 
-      // 4. 保存 APK 路径供前台读取
+      // 5. 保存 APK 路径供前台读取
       await prefs.setString('bg_build_apk_path', apkPath);
       await prefs.setBool('bg_build_completed', true);
       await prefs.setBool('bg_build_active', false);
@@ -434,7 +464,7 @@ class BuildTaskHandler extends TaskHandler {
         notificationText: '点击安装 APK',
       );
 
-      // 5. 自动打开安装程序
+      // 6. 自动打开安装程序
       await OpenFilex.open(apkPath);
 
       await Future.delayed(const Duration(seconds: 2));
@@ -455,6 +485,7 @@ class BuildTaskHandler extends TaskHandler {
 
   @override
   Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {
+
     // 清理
   }
 
