@@ -6,7 +6,9 @@ import 'package:path_provider/path_provider.dart';
 import 'package:archive/archive.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:flutter_foreground_task/models/service_request_result.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
 import '../services/github_service.dart';
 import '../services/storage_service.dart';
 import '../services/background_build_service.dart';
@@ -96,7 +98,7 @@ class _BuildScreenState extends State<BuildScreen> with WidgetsBindingObserver {
     _pollTimer?.cancel();
     _tickTimer?.cancel();
 
-    // 返回值改为 ServiceRequestResult，但我们只关心是否启动成功
+    // 返回值是 ServiceRequestResult（sealed class）
     final result = await _bgService.startBackgroundMonitor(
       token: token,
       owner: _selectedRepo!.owner,
@@ -106,14 +108,14 @@ class _BuildScreenState extends State<BuildScreen> with WidgetsBindingObserver {
       startTime: appState.buildStartTime ?? DateTime.now(),
     );
     
-    // 可选：检查启动结果
-    if (!result.success) {
+    // 使用类型匹配检查启动结果
+    if (result is ServiceRequestFailure) {
       debugPrint('后台服务启动失败: ${result.error}');
     }
   }
 
-
   /// 停止后台服务
+
   Future<void> _stopBackgroundService() async {
     await _bgService.stopBackgroundMonitor();
   }
