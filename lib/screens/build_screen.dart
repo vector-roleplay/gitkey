@@ -92,7 +92,9 @@ class _BuildScreenState extends State<BuildScreen> with WidgetsBindingObserver {
     final token = storage.getToken();
     
     if (token == null || _selectedRepo == null || _selectedWorkflow == null) return;
-    if (appState.buildRunId == null) return;
+    
+    // 只要有构建任务就启动后台服务（不再要求 buildRunId 必须存在）
+    if (!appState.hasBuildInProgress) return;
 
     // 停止前台轮询
     _pollTimer?.cancel();
@@ -104,7 +106,7 @@ class _BuildScreenState extends State<BuildScreen> with WidgetsBindingObserver {
       owner: _selectedRepo!.owner,
       repo: _selectedRepo!.name,
       workflowId: _selectedWorkflow!.fileName,
-      runId: appState.buildRunId!,
+      runId: appState.buildRunId ?? 0,  // 允许为 0，后台服务会自己轮询获取
       startTime: appState.buildStartTime ?? DateTime.now(),
     );
     
@@ -115,6 +117,7 @@ class _BuildScreenState extends State<BuildScreen> with WidgetsBindingObserver {
   }
 
   /// 停止后台服务
+
 
   Future<void> _stopBackgroundService() async {
     await _bgService.stopBackgroundMonitor();
@@ -430,6 +433,7 @@ class _BuildScreenState extends State<BuildScreen> with WidgetsBindingObserver {
 
     final github = context.read<GitHubService>();
 
+    // 1. 获取 artifacts
     final artifactsResult = await github.getArtifacts(
       owner: _selectedRepo!.owner,
       repo: _selectedRepo!.name,
@@ -446,27 +450,32 @@ class _BuildScreenState extends State<BuildScreen> with WidgetsBindingObserver {
 
     final artifact = artifactsResult.artifacts.first;
 
-    final downloadResult = await github.downloadArtifact(
-      owner: _selectedRepo!.owner,
-      repo: _selectedRepo!.name,
-      artifactId: artifact.id,
-    );
+    appState.updateDownloadState(progress: 0.2);
 
-    if (downloadResult.error != null || downloadResult.bytes == null) {
-      appState.updateDownloadState(isDownloading: false);
-      setState(() {
-        _errorMessage = downloadResult.error ?? '下载失败';
-      });
-      return;
-    }
-
-    appState.updateDownloadState(progress: 0.5);
-
+    // 2. 使用流式下载（避免大文件内存问题）
     try {
       final tempDir = await getTemporaryDirectory();
-      final zipFile = File('${tempDir.path}/artifact.zip');
-      await zipFile.writeAsBytes(downloadResult.bytes!);
+      final zipPath = '${tempDir.path}/artifact_${DateTime.now().millisecondsSinceEpoch}.zip';
 
+      final downloadResult = await github.downloadArtifactToFile(
+        owner: _selectedRepo!.owner,
+        repo: _selectedRepo!.name,
+        artifactId: artifact.id,
+        savePath: zipPath,
+      );
+
+      if (downloadResult.error != null || downloadResult.filePath == null) {
+        appState.updateDownloadState(isDownloading: false);
+        setState(() {
+          _errorMessage = downloadResult.error ?? '下载失败';
+        });
+        return;
+      }
+
+      appState.updateDownloadState(progress: 0.7);
+
+      // 3. 解压 ZIP
+      final zipFile = File(downloadResult.filePath!);
       final bytes = await zipFile.readAsBytes();
       final archive = ZipDecoder().decodeBytes(bytes);
 
@@ -480,6 +489,7 @@ class _BuildScreenState extends State<BuildScreen> with WidgetsBindingObserver {
         }
       }
 
+      // 清理 zip
       await zipFile.delete();
 
       if (apkPath == null) {
@@ -496,6 +506,7 @@ class _BuildScreenState extends State<BuildScreen> with WidgetsBindingObserver {
         apkPath: apkPath,
       );
 
+      // 4. 自动打开安装程序
       await OpenFilex.open(apkPath);
       
     } catch (e) {
@@ -507,6 +518,7 @@ class _BuildScreenState extends State<BuildScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _installApk() async {
+
     final appState = context.read<AppState>();
     final apkPath = appState.downloadedApkPath;
     
