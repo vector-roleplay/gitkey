@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'dart:async';
 import 'dart:io';
 import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
+
 
 
 class GitHubService {
@@ -290,7 +292,71 @@ class GitHubService {
     }
   }
 
-  /// 下载 artifact（返回 zip 字节数据）
+  /// 下载 artifact（返回保存的文件路径）
+  /// 使用流式下载，避免大文件导致内存问题
+  Future<({String? filePath, String? error})> downloadArtifactToFile({
+    required String owner,
+    required String repo,
+    required int artifactId,
+    required String savePath,
+  }) async {
+    try {
+      // 1. 获取下载 URL（GitHub 会返回 302 重定向）
+      final request = http.Request(
+        'GET',
+        Uri.parse('$_baseUrl/repos/$owner/$repo/actions/artifacts/$artifactId/zip'),
+      );
+      request.headers.addAll(_headers);
+      request.followRedirects = false;  // 不自动跟随重定向
+
+      final response = await request.send().timeout(const Duration(seconds: 30));
+
+      String downloadUrl;
+      if (response.statusCode == 302) {
+        downloadUrl = response.headers['location'] ?? '';
+        if (downloadUrl.isEmpty) {
+          return (filePath: null, error: '获取下载链接失败');
+        }
+      } else if (response.statusCode == 200) {
+        // 直接返回了内容（不太可能，但处理一下）
+        final bytes = await response.stream.toBytes();
+        final file = File(savePath);
+        await file.writeAsBytes(bytes);
+        return (filePath: savePath, error: null);
+      } else {
+        return (filePath: null, error: 'HTTP ${response.statusCode}');
+      }
+
+      // 2. 流式下载文件
+      final downloadRequest = http.Request('GET', Uri.parse(downloadUrl));
+      final downloadResponse = await downloadRequest.send().timeout(const Duration(seconds: 30));
+
+      if (downloadResponse.statusCode != 200) {
+        return (filePath: null, error: '下载失败: HTTP ${downloadResponse.statusCode}');
+      }
+
+      // 3. 边下载边写入文件
+      final file = File(savePath);
+      final sink = file.openWrite();
+      
+      try {
+        await for (final chunk in downloadResponse.stream) {
+          sink.add(chunk);
+        }
+        await sink.flush();
+      } finally {
+        await sink.close();
+      }
+
+      return (filePath: savePath, error: null);
+    } on TimeoutException {
+      return (filePath: null, error: '下载超时');
+    } catch (e) {
+      return (filePath: null, error: e.toString());
+    }
+  }
+
+  /// 下载 artifact（返回 zip 字节数据）- 保留旧方法兼容
   Future<({List<int>? bytes, String? error})> downloadArtifact({
     required String owner,
     required String repo,
@@ -325,6 +391,7 @@ class GitHubService {
   }
 
   /// 获取仓库的 workflows 列表
+
   Future<({List<WorkflowInfo> workflows, String? error})> getWorkflows({
     required String owner,
     required String repo,
