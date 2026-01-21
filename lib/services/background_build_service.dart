@@ -2,12 +2,13 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart' hide NotificationVisibility;
 import 'package:path_provider/path_provider.dart';
 import 'package:archive/archive.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+
 
 /// 后台构建监控服务
 class BackgroundBuildService {
@@ -101,8 +102,8 @@ class BackgroundBuildService {
       playSound: false,
       enableVibration: false,
       category: AndroidNotificationCategory.progress,
-      visibility: NotificationVisibility.public,
     );
+
 
     await _notifications.show(
       _chronometerNotificationId,
