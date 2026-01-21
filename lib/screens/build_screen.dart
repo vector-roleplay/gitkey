@@ -96,7 +96,8 @@ class _BuildScreenState extends State<BuildScreen> with WidgetsBindingObserver {
     _pollTimer?.cancel();
     _tickTimer?.cancel();
 
-    await _bgService.startBackgroundMonitor(
+    // 返回值改为 ServiceRequestResult，但我们只关心是否启动成功
+    final result = await _bgService.startBackgroundMonitor(
       token: token,
       owner: _selectedRepo!.owner,
       repo: _selectedRepo!.name,
@@ -104,7 +105,13 @@ class _BuildScreenState extends State<BuildScreen> with WidgetsBindingObserver {
       runId: appState.buildRunId!,
       startTime: appState.buildStartTime ?? DateTime.now(),
     );
+    
+    // 可选：检查启动结果
+    if (!result.success) {
+      debugPrint('后台服务启动失败: ${result.error}');
+    }
   }
+
 
   /// 停止后台服务
   Future<void> _stopBackgroundService() async {
