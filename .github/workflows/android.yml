@@ -104,7 +104,7 @@ jobs:
           EOF
 
           
-      - name: Add permissions
+      - name: Add permissions and services
         run: |
           # 添加网络权限
           sed -i '/<manifest xmlns/a\    <uses-permission android:name="android.permission.INTERNET"/>' android/app/src/main/AndroidManifest.xml
@@ -126,6 +126,11 @@ jobs:
           sed -i '/<uses-permission android:name="android.permission.WAKE_LOCK"/a\    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>' android/app/src/main/AndroidManifest.xml
           # 添加 requestLegacyExternalStorage 用于 Android 10 兼容
           sed -i 's/<application/<application android:requestLegacyExternalStorage="true"/' android/app/src/main/AndroidManifest.xml
+          
+          # ========== 关键：注册前台服务组件 ==========
+          # 在 </activity> 后面添加 ForegroundService
+          sed -i '/<\/activity>/a\        <service android:name="com.pravera.flutter_foreground_task.service.ForegroundService" android:foregroundServiceType="dataSync" android:exported="false" \/>' android/app/src/main/AndroidManifest.xml
+
 
 
       
