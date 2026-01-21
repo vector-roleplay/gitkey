@@ -112,15 +112,15 @@ class AppState extends ChangeNotifier {
   String? _buildConclusion;      // success, failure, cancelled
   DateTime? _buildStartTime;     // 用于计时（与官网同步）
   String? _buildRepoFullName;    // 正在构建的仓库
-  bool _isDownloading = false;
-  double _downloadProgress = 0;
-  String? _downloadedApkPath;
+  Duration _clockOffset = Duration.zero;  // 本地时钟与服务器时钟的偏差
   
   int? get buildRunId => _buildRunId;
   String? get buildStatus => _buildStatus;
   String? get buildConclusion => _buildConclusion;
   DateTime? get buildStartTime => _buildStartTime;
   String? get buildRepoFullName => _buildRepoFullName;
+  Duration get clockOffset => _clockOffset;
+
   bool get isDownloading => _isDownloading;
   double get downloadProgress => _downloadProgress;
   String? get downloadedApkPath => _downloadedApkPath;
@@ -144,6 +144,16 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
   
+  /// 更新时钟偏差（用于与服务器时间同步）
+  void updateClockOffset(DateTime serverTime) {
+    _clockOffset = serverTime.difference(DateTime.now());
+    // 不需要 notifyListeners，因为这只是校准值
+  }
+  
+  /// 获取校准后的当前时间（与服务器同步）
+  DateTime get calibratedNow => DateTime.now().add(_clockOffset);
+
+  
   void updateDownloadState({bool? isDownloading, double? progress, String? apkPath}) {
     _isDownloading = isDownloading ?? _isDownloading;
     _downloadProgress = progress ?? _downloadProgress;
@@ -160,8 +170,10 @@ class AppState extends ChangeNotifier {
     _isDownloading = false;
     _downloadProgress = 0;
     _downloadedApkPath = null;
+    _clockOffset = Duration.zero;
     notifyListeners();
   }
+
   
   Repository? get selectedRepo => _selectedRepo;
   bool get useWorkspaceMode => _useWorkspaceMode;
