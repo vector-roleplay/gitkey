@@ -117,8 +117,15 @@ jobs:
           sed -i '/<uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/a\    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>' android/app/src/main/AndroidManifest.xml
           # 添加前台服务权限（后台下载需要）
           sed -i '/<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/a\    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>' android/app/src/main/AndroidManifest.xml
+          # 添加前台服务类型权限（Android 14+）
+          sed -i '/<uses-permission android:name="android.permission.FOREGROUND_SERVICE"/a\    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>' android/app/src/main/AndroidManifest.xml
+          # 添加唤醒锁权限
+          sed -i '/<uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/a\    <uses-permission android:name="android.permission.WAKE_LOCK"/>' android/app/src/main/AndroidManifest.xml
+          # 添加开机启动权限（可选）
+          sed -i '/<uses-permission android:name="android.permission.WAKE_LOCK"/a\    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>' android/app/src/main/AndroidManifest.xml
           # 添加 requestLegacyExternalStorage 用于 Android 10 兼容
           sed -i 's/<application/<application android:requestLegacyExternalStorage="true"/' android/app/src/main/AndroidManifest.xml
+
 
       
       - name: Setup Keystore
