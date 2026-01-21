@@ -18,6 +18,7 @@ class BackgroundBuildService {
   static const String _notificationChannelName = '构建通知';
   static const int _buildNotificationId = 1001;
   static const int _downloadNotificationId = 1002;
+  static const int _chronometerNotificationId = 1003;  // 计时器通知ID
 
   final FlutterLocalNotificationsPlugin _notifications = FlutterLocalNotificationsPlugin();
   bool _isInitialized = false;
@@ -64,16 +65,69 @@ class BackgroundBuildService {
         channelDescription: 'APK 构建监控服务',
         channelImportance: NotificationChannelImportance.LOW,
         priority: NotificationPriority.LOW,
+        visibility: NotificationVisibility.VISIBILITY_PUBLIC,
       ),
       iosNotificationOptions: const IOSNotificationOptions(),
       foregroundTaskOptions: ForegroundTaskOptions(
-        eventAction: ForegroundTaskEventAction.repeat(5000), // 5秒轮询
+        eventAction: ForegroundTaskEventAction.repeat(5000), // 5秒轮询构建状态
         autoRunOnBoot: false,
         autoRunOnMyPackageReplaced: false,
         allowWakeLock: true,
         allowWifiLock: true,
       ),
     );
+  }
+
+  /// 显示带 Chronometer 的计时通知（系统级自动计时）
+  Future<void> showChronometerNotification({
+    required DateTime startTime,
+    required String title,
+    String? body,
+  }) async {
+    await init();
+
+    final androidDetails = AndroidNotificationDetails(
+      _notificationChannelId,
+      _notificationChannelName,
+      channelDescription: 'APK 构建进度通知',
+      importance: Importance.low,
+      priority: Priority.low,
+      ongoing: true,
+      autoCancel: false,
+      showWhen: true,
+      usesChronometer: true,  // 关键：启用系统计时器
+      when: startTime.millisecondsSinceEpoch,  // 计时起始时间
+      chronometerCountDown: false,  // 正向计时
+      playSound: false,
+      enableVibration: false,
+      category: AndroidNotificationCategory.progress,
+      visibility: NotificationVisibility.public,
+    );
+
+    await _notifications.show(
+      _chronometerNotificationId,
+      title,
+      body ?? '构建进行中...',
+      NotificationDetails(android: androidDetails),
+    );
+  }
+
+  /// 更新计时通知的文本（保持计时器运行）
+  Future<void> updateChronometerNotification({
+    required DateTime startTime,
+    required String title,
+    String? body,
+  }) async {
+    await showChronometerNotification(
+      startTime: startTime,
+      title: title,
+      body: body,
+    );
+  }
+
+  /// 取消计时通知
+  Future<void> cancelChronometerNotification() async {
+    await _notifications.cancel(_chronometerNotificationId);
   }
 
   /// 开始后台监控构建
@@ -98,10 +152,17 @@ class BackgroundBuildService {
     await prefs.setString('bg_build_start_time', startTime.toIso8601String());
     await prefs.setBool('bg_build_active', true);
 
-    // 启动前台服务
+    // 显示带 Chronometer 的计时通知（系统自动计时，无需手动更新）
+    await showChronometerNotification(
+      startTime: startTime,
+      title: '🔨 正在构建 APK',
+      body: '构建进行中...',
+    );
+
+    // 启动前台服务（用于保活和轮询构建状态）
     return FlutterForegroundTask.startService(
-      notificationTitle: '正在构建 APK',
-      notificationText: '已用时: 0秒',
+      notificationTitle: '构建监控运行中',
+      notificationText: '正在后台监控构建状态',
       callback: startCallback,
     );
   }
@@ -111,7 +172,10 @@ class BackgroundBuildService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('bg_build_active', false);
     
+    // 取消计时通知
+    await cancelChronometerNotification();
     await _notifications.cancel(_buildNotificationId);
+    
     return FlutterForegroundTask.stopService();
   }
 
@@ -120,41 +184,15 @@ class BackgroundBuildService {
     return FlutterForegroundTask.isRunningService;
   }
 
-  /// 更新通知（用于前台时更新）
-  Future<void> updateNotification({
-    required String title,
-    required String body,
-    bool ongoing = true,
-  }) async {
-    await init();
-
-    final androidDetails = AndroidNotificationDetails(
-      _notificationChannelId,
-      _notificationChannelName,
-      channelDescription: 'APK 构建进度通知',
-      importance: Importance.low,
-      priority: Priority.low,
-      ongoing: ongoing,
-      autoCancel: !ongoing,
-      showWhen: false,
-      playSound: false,
-      enableVibration: false,
-    );
-
-    await _notifications.show(
-      _buildNotificationId,
-      title,
-      body,
-      NotificationDetails(android: androidDetails),
-    );
-  }
-
   /// 显示构建完成通知
   Future<void> showCompletionNotification({
     required bool success,
     String? message,
   }) async {
     await init();
+    
+    // 先取消计时通知
+    await cancelChronometerNotification();
 
     final androidDetails = AndroidNotificationDetails(
       _notificationChannelId,
@@ -180,6 +218,9 @@ class BackgroundBuildService {
     required int total,
   }) async {
     await init();
+    
+    // 先取消计时通知
+    await cancelChronometerNotification();
 
     final percent = total > 0 ? (progress * 100 ~/ total) : 0;
 
@@ -228,17 +269,23 @@ class BuildTaskHandler extends TaskHandler {
   String? _repo;
   String? _workflowId;
   bool _isDownloading = false;
+  
+  final FlutterLocalNotificationsPlugin _notifications = FlutterLocalNotificationsPlugin();
 
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
+    await _initNotifications();
     await _initFromPrefs();
   }
-
   
-  Future<void> _initFromPrefs() async {
-    // 从 SharedPreferences 读取构建信息
-    final prefs = await SharedPreferences.getInstance();
+  Future<void> _initNotifications() async {
+    const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
+    const initSettings = InitializationSettings(android: androidSettings);
+    await _notifications.initialize(initSettings);
+  }
 
+  Future<void> _initFromPrefs() async {
+    final prefs = await SharedPreferences.getInstance();
     _token = prefs.getString('bg_build_token');
     _owner = prefs.getString('bg_build_owner');
     _repo = prefs.getString('bg_build_repo');
@@ -260,27 +307,13 @@ class BuildTaskHandler extends TaskHandler {
     // 接收主线程数据（暂不使用）
   }
 
-  
   Future<void> _doRepeatEvent() async {
     final prefs = await SharedPreferences.getInstance();
     final isActive = prefs.getBool('bg_build_active') ?? false;
     
     if (!isActive || _isDownloading) return;
 
-    // 更新已用时间
-    if (_startTime != null) {
-      final elapsed = DateTime.now().difference(_startTime!);
-      final minutes = elapsed.inMinutes;
-      final seconds = elapsed.inSeconds % 60;
-      final timeStr = minutes > 0 ? '$minutes分${seconds}秒' : '$seconds秒';
-      
-      FlutterForegroundTask.updateService(
-        notificationTitle: '🔨 正在构建 APK',
-        notificationText: '已用时: $timeStr',
-      );
-    }
-
-    // 检查构建状态
+    // 只检查构建状态，不更新计时（计时由系统 Chronometer 自动处理）
     await _checkBuildStatus(prefs);
   }
 
@@ -320,6 +353,8 @@ class BuildTaskHandler extends TaskHandler {
             _startTime = DateTime.tryParse(run['run_started_at']);
             if (_startTime != null) {
               await prefs.setString('bg_build_start_time', _startTime!.toIso8601String());
+              // 更新 Chronometer 通知的开始时间
+              await _showChronometerNotification(_startTime!);
             }
           }
 
@@ -327,10 +362,7 @@ class BuildTaskHandler extends TaskHandler {
             if (conclusion == 'success') {
               await _downloadAndInstall(prefs);
             } else {
-              FlutterForegroundTask.updateService(
-                notificationTitle: '❌ 构建失败',
-                notificationText: '结论: $conclusion',
-              );
+              await _showFailureNotification(conclusion);
               await prefs.setBool('bg_build_active', false);
               await Future.delayed(const Duration(seconds: 3));
               FlutterForegroundTask.stopService();
@@ -343,14 +375,63 @@ class BuildTaskHandler extends TaskHandler {
     }
   }
 
+  /// 显示 Chronometer 通知
+  Future<void> _showChronometerNotification(DateTime startTime) async {
+    final androidDetails = AndroidNotificationDetails(
+      'build_channel',
+      '构建通知',
+      channelDescription: 'APK 构建进度通知',
+      importance: Importance.low,
+      priority: Priority.low,
+      ongoing: true,
+      autoCancel: false,
+      showWhen: true,
+      usesChronometer: true,
+      when: startTime.millisecondsSinceEpoch,
+      chronometerCountDown: false,
+      playSound: false,
+      enableVibration: false,
+    );
+
+    await _notifications.show(
+      1003,
+      '🔨 正在构建 APK',
+      '构建进行中...',
+      NotificationDetails(android: androidDetails),
+    );
+  }
+
+  /// 显示失败通知
+  Future<void> _showFailureNotification(String? conclusion) async {
+    // 取消计时通知
+    await _notifications.cancel(1003);
+    
+    final androidDetails = AndroidNotificationDetails(
+      'build_channel',
+      '构建通知',
+      channelDescription: 'APK 构建进度通知',
+      importance: Importance.high,
+      priority: Priority.high,
+      ongoing: false,
+      autoCancel: true,
+    );
+
+    await _notifications.show(
+      1001,
+      '❌ 构建失败',
+      '结论: $conclusion',
+      NotificationDetails(android: androidDetails),
+    );
+  }
+
   Future<void> _downloadAndInstall(SharedPreferences prefs) async {
     if (_isDownloading) return;
     _isDownloading = true;
 
-    FlutterForegroundTask.updateService(
-      notificationTitle: '📥 正在下载 APK',
-      notificationText: '获取下载链接...',
-    );
+    // 取消计时通知，显示下载通知
+    await _notifications.cancel(1003);
+    
+    await _showDownloadNotification('获取下载链接...');
 
     try {
       // 1. 获取 artifacts
@@ -377,10 +458,7 @@ class BuildTaskHandler extends TaskHandler {
       final artifactId = artifacts.first['id'] as int;
 
       // 2. 获取下载重定向 URL
-      FlutterForegroundTask.updateService(
-        notificationTitle: '📥 正在下载 APK',
-        notificationText: '获取下载链接...',
-      );
+      await _showDownloadNotification('下载中...');
 
       final downloadApiUrl = 'https://api.github.com/repos/$_owner/$_repo/actions/artifacts/$artifactId/zip';
       final redirectRequest = http.Request('GET', Uri.parse(downloadApiUrl));
@@ -402,11 +480,6 @@ class BuildTaskHandler extends TaskHandler {
       }
 
       // 3. 流式下载文件
-      FlutterForegroundTask.updateService(
-        notificationTitle: '📥 正在下载 APK',
-        notificationText: '下载中...',
-      );
-
       final tempDir = await getTemporaryDirectory();
       final zipPath = '${tempDir.path}/artifact_${DateTime.now().millisecondsSinceEpoch}.zip';
       final zipFile = File(zipPath);
@@ -418,7 +491,6 @@ class BuildTaskHandler extends TaskHandler {
         throw Exception('下载失败: ${downloadResponse.statusCode}');
       }
 
-      // 边下载边写入文件
       final sink = zipFile.openWrite();
       try {
         await for (final chunk in downloadResponse.stream) {
@@ -429,10 +501,7 @@ class BuildTaskHandler extends TaskHandler {
         await sink.close();
       }
 
-      FlutterForegroundTask.updateService(
-        notificationTitle: '📦 正在解压',
-        notificationText: '处理中...',
-      );
+      await _showDownloadNotification('解压中...');
 
       // 4. 解压
       final bytes = await zipFile.readAsBytes();
@@ -459,10 +528,7 @@ class BuildTaskHandler extends TaskHandler {
       await prefs.setBool('bg_build_completed', true);
       await prefs.setBool('bg_build_active', false);
 
-      FlutterForegroundTask.updateService(
-        notificationTitle: '✅ 下载完成',
-        notificationText: '点击安装 APK',
-      );
+      await _showSuccessNotification();
 
       // 6. 自动打开安装程序
       await OpenFilex.open(apkPath);
@@ -471,10 +537,7 @@ class BuildTaskHandler extends TaskHandler {
       FlutterForegroundTask.stopService();
 
     } catch (e) {
-      FlutterForegroundTask.updateService(
-        notificationTitle: '❌ 下载失败',
-        notificationText: e.toString(),
-      );
+      await _showErrorNotification(e.toString());
       await prefs.setBool('bg_build_active', false);
       _isDownloading = false;
       
@@ -483,13 +546,75 @@ class BuildTaskHandler extends TaskHandler {
     }
   }
 
-  @override
-  Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {
+  Future<void> _showDownloadNotification(String text) async {
+    final androidDetails = AndroidNotificationDetails(
+      'build_channel',
+      '构建通知',
+      channelDescription: 'APK 构建进度通知',
+      importance: Importance.low,
+      priority: Priority.low,
+      ongoing: true,
+      autoCancel: false,
+      showWhen: false,
+      playSound: false,
+      enableVibration: false,
+    );
 
-    // 清理
+    await _notifications.show(
+      1002,
+      '📥 正在下载 APK',
+      text,
+      NotificationDetails(android: androidDetails),
+    );
   }
 
+  Future<void> _showSuccessNotification() async {
+    await _notifications.cancel(1002);
+    
+    final androidDetails = AndroidNotificationDetails(
+      'build_channel',
+      '构建通知',
+      channelDescription: 'APK 构建进度通知',
+      importance: Importance.high,
+      priority: Priority.high,
+      ongoing: false,
+      autoCancel: true,
+    );
 
+    await _notifications.show(
+      1001,
+      '✅ 下载完成',
+      '点击安装 APK',
+      NotificationDetails(android: androidDetails),
+    );
+  }
+
+  Future<void> _showErrorNotification(String error) async {
+    await _notifications.cancel(1002);
+    
+    final androidDetails = AndroidNotificationDetails(
+      'build_channel',
+      '构建通知',
+      channelDescription: 'APK 构建进度通知',
+      importance: Importance.high,
+      priority: Priority.high,
+      ongoing: false,
+      autoCancel: true,
+    );
+
+    await _notifications.show(
+      1001,
+      '❌ 下载失败',
+      error,
+      NotificationDetails(android: androidDetails),
+    );
+  }
+
+  @override
+  Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {
+    // 确保取消所有通知
+    await _notifications.cancel(1003);
+  }
 
   @override
   void onNotificationButtonPressed(String id) {
