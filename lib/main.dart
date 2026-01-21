@@ -112,6 +112,9 @@ class AppState extends ChangeNotifier {
   String? _buildConclusion;      // success, failure, cancelled
   DateTime? _buildStartTime;     // 用于计时（与官网同步）
   String? _buildRepoFullName;    // 正在构建的仓库
+  bool _isDownloading = false;
+  double _downloadProgress = 0;
+  String? _downloadedApkPath;
   Duration _clockOffset = Duration.zero;  // 本地时钟与服务器时钟的偏差
   
   int? get buildRunId => _buildRunId;
@@ -120,10 +123,10 @@ class AppState extends ChangeNotifier {
   DateTime? get buildStartTime => _buildStartTime;
   String? get buildRepoFullName => _buildRepoFullName;
   Duration get clockOffset => _clockOffset;
-
   bool get isDownloading => _isDownloading;
   double get downloadProgress => _downloadProgress;
   String? get downloadedApkPath => _downloadedApkPath;
+
   
   bool get hasBuildInProgress => _buildStatus == 'queued' || _buildStatus == 'in_progress';
   bool get isBuildSuccess => _buildStatus == 'completed' && _buildConclusion == 'success';
