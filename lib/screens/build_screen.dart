@@ -513,7 +513,56 @@ class _BuildScreenState extends State<BuildScreen> with WidgetsBindingObserver {
     if (apkPath != null) {
       await OpenFilex.open(apkPath);
     }
+  }/// 取消构建
+  Future<void> _cancelBuild() async {
+    final appState = context.read<AppState>();
+    final github = context.read<GitHubService>();
+    
+    // 如果正在下载，只取消本地状态
+    if (appState.isDownloading) {
+      _stopPolling();
+      _stopTicking();
+      _stopForegroundService();
+      appState.clearBuildState();
+      setState(() {
+        _elapsedTime = '';
+      });
+      return;
+    }
+    
+    // 如果有正在运行的构建，调用 GitHub API 取消
+    if (appState.buildRunId != null && _selectedRepo != null) {
+      final result = await github.cancelWorkflowRun(
+        owner: _selectedRepo!.owner,
+        repo: _selectedRepo!.name,
+        runId: appState.buildRunId!,
+      );
+      
+      if (result.success) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('已取消构建')),
+          );
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('取消失败: ${result.error ?? "未知错误"}')),
+          );
+        }
+      }
+    }
+    
+    // 清理本地状态
+    _stopPolling();
+    _stopTicking();
+    _stopForegroundService();
+    appState.clearBuildState();
+    setState(() {
+      _elapsedTime = '';
+    });
   }
+
 
   String _getStatusText(AppState appState) {
     if (_isTriggering) return '正在触发构建...';
@@ -764,17 +813,10 @@ class _BuildScreenState extends State<BuildScreen> with WidgetsBindingObserver {
                           ),
                           if (hasActiveTask)
                             TextButton(
-                              onPressed: () {
-                                _stopPolling();
-                                _stopTicking();
-                                _stopForegroundService();
-                                context.read<AppState>().clearBuildState();
-                                setState(() {
-                                  _elapsedTime = '';
-                                });
-                              },
+                              onPressed: _cancelBuild,
                               child: const Text('取消'),
                             ),
+
                         ],
                       ),
                       if (_errorMessage != null) ...[
