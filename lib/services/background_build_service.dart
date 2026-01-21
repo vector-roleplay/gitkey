@@ -152,13 +152,10 @@ class BackgroundBuildService {
     await prefs.setInt('bg_build_run_id', runId);
     await prefs.setString('bg_build_start_time', startTime.toIso8601String());
     await prefs.setBool('bg_build_active', true);
-
-    // 显示带 Chronometer 的计时通知（系统自动计时，无需手动更新）
-    await showChronometerNotification(
-      startTime: startTime,
-      title: '🔨 正在构建 APK',
-      body: '构建进行中...',
-    );
+    
+    // 🔧 关键：确保数据完全写入磁盘后再启动后台服务
+    // SharedPreferences 在独立 isolate 中需要重新加载，必须确保数据已持久化
+    await Future.delayed(const Duration(milliseconds: 500));
 
     // 启动前台服务（用于保活和轮询构建状态）
     return FlutterForegroundTask.startService(
@@ -167,6 +164,7 @@ class BackgroundBuildService {
       callback: startCallback,
     );
   }
+
 
   /// 停止后台监控
   Future<ServiceRequestResult> stopBackgroundMonitor() async {
@@ -270,6 +268,8 @@ class BuildTaskHandler extends TaskHandler {
   String? _repo;
   String? _workflowId;
   bool _isDownloading = false;
+  bool _isInitialized = false;  // 🔧 新增：标记是否已成功初始化
+  int _initRetryCount = 0;      // 🔧 新增：初始化重试计数
   
   final FlutterLocalNotificationsPlugin _notifications = FlutterLocalNotificationsPlugin();
 
@@ -287,6 +287,9 @@ class BuildTaskHandler extends TaskHandler {
 
   Future<void> _initFromPrefs() async {
     final prefs = await SharedPreferences.getInstance();
+    // 🔧 强制重新从磁盘加载（解决 isolate 缓存问题）
+    await prefs.reload();
+    
     _token = prefs.getString('bg_build_token');
     _owner = prefs.getString('bg_build_owner');
     _repo = prefs.getString('bg_build_repo');
@@ -296,6 +299,9 @@ class BuildTaskHandler extends TaskHandler {
     if (startTimeStr != null) {
       _startTime = DateTime.tryParse(startTimeStr);
     }
+    
+    // 🔧 检查是否成功初始化
+    _isInitialized = _token != null && _owner != null && _repo != null && _workflowId != null;
   }
 
   @override
@@ -308,17 +314,39 @@ class BuildTaskHandler extends TaskHandler {
     // 接收主线程数据（暂不使用）
   }
 
+
   Future<void> _doRepeatEvent() async {
     final prefs = await SharedPreferences.getInstance();
+    // 🔧 每次都强制重新加载，确保获取最新数据
+    await prefs.reload();
+    
     final isActive = prefs.getBool('bg_build_active') ?? false;
     
     if (!isActive || _isDownloading) return;
+
+    // 🔧 如果还没初始化成功，尝试重新初始化（最多重试10次）
+    if (!_isInitialized && _initRetryCount < 10) {
+      _initRetryCount++;
+      await _initFromPrefs();
+      if (!_isInitialized) {
+        // 还是没初始化成功，等下一次轮询再试
+        return;
+      }
+    }
+    
+    // 🔧 如果重试多次还是失败，直接停止服务
+    if (!_isInitialized) {
+      await prefs.setBool('bg_build_active', false);
+      FlutterForegroundTask.stopService();
+      return;
+    }
 
     // 只检查构建状态，不更新计时（计时由系统 Chronometer 自动处理）
     await _checkBuildStatus(prefs);
   }
 
   Future<void> _checkBuildStatus(SharedPreferences prefs) async {
+
     if (_token == null || _owner == null || _repo == null || _workflowId == null) {
       return;
     }
