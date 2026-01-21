@@ -13,7 +13,6 @@ dependencies:
     sdk: flutter
   collection: ^1.15.0
 
-
   http: any
   shared_preferences: any
   provider: any
@@ -24,6 +23,9 @@ dependencies:
   archive: any
   open_filex: any
   background_downloader: any
+  flutter_local_notifications: any
+  flutter_foreground_task: any
+
 
 
 dev_dependencies:
