@@ -6,10 +6,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:archive/archive.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
-import 'package:flutter_foreground_task/models/service_request_result.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:permission_handler/permission_handler.dart';
-
 
 import '../services/github_service.dart';
 import '../services/storage_service.dart';
@@ -44,6 +41,7 @@ class _BuildScreenState extends State<BuildScreen> with WidgetsBindingObserver {
   
   // 后台服务
   final _bgService = BackgroundBuildService.instance;
+  bool _isInBackground = false;
 
   @override
   void initState() {
@@ -66,7 +64,6 @@ class _BuildScreenState extends State<BuildScreen> with WidgetsBindingObserver {
     }
   }
 
-
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
@@ -83,127 +80,47 @@ class _BuildScreenState extends State<BuildScreen> with WidgetsBindingObserver {
     
     if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
       // 应用进入后台
-      if (appState.hasBuildInProgress) {
-        _startBackgroundService();
+      _isInBackground = true;
+      if (appState.hasBuildInProgress || appState.isDownloading) {
+        _startForegroundService();
       }
     } else if (state == AppLifecycleState.resumed) {
       // 应用回到前台
-      _stopBackgroundService();
-      _handleAppResumed();
+      _isInBackground = false;
+      _stopForegroundService();
     }
   }
 
-  /// 处理应用恢复到前台
-  Future<void> _handleAppResumed() async {
+  /// 启动前台服务（仅保活进程）
+  Future<void> _startForegroundService() async {
     final appState = context.read<AppState>();
     
-    // 先等待后台结果检查完成
-    await _checkBackgroundResult();
+    String title;
+    String text;
     
-    // 如果后台已经下载完成，直接打开安装
-    if (appState.downloadedApkPath != null) {
-      await OpenFilex.open(appState.downloadedApkPath!);
-      return;
-    }
-    
-    // 如果还在构建中，重新启动前台轮询
-    if (appState.hasBuildInProgress) {
-
-      _startPolling();
-      _startTicking();
-    }
-  }
-
-  /// 启动后台服务
-  Future<void> _startBackgroundService() async {
-    final appState = context.read<AppState>();
-    final storage = context.read<StorageService>();
-    final token = storage.getToken();
-    
-    if (token == null || _selectedRepo == null || _selectedWorkflow == null) {
-      debugPrint('后台服务启动失败: token/repo/workflow 为空');
-      return;
-    }
-
-    
-    // 只要有构建任务就启动后台服务（不再要求 buildRunId 必须存在）
-    if (!appState.hasBuildInProgress) {
-      debugPrint('后台服务启动失败: 没有进行中的构建');
-      return;
-    }
-
-    // 检查并请求通知权限
-    if (Platform.isAndroid) {
-      final notificationStatus = await Permission.notification.status;
-      if (!notificationStatus.isGranted) {
-        debugPrint('通知权限未授予，尝试请求...');
-        final result = await Permission.notification.request();
-        if (!result.isGranted) {
-          debugPrint('通知权限被拒绝');
-        }
-      }
-    }
-
-    // 停止前台轮询
-    _pollTimer?.cancel();
-    _tickTimer?.cancel();
-
-    debugPrint('正在启动后台服务...');
-    debugPrint('  token: ${token.substring(0, 8)}...');
-    debugPrint('  repo: ${_selectedRepo!.fullName}');
-    debugPrint('  workflow: ${_selectedWorkflow!.fileName}');
-    debugPrint('  runId: ${appState.buildRunId ?? 0}');
-
-    // 返回值是 ServiceRequestResult（sealed class）
-    final result = await _bgService.startBackgroundMonitor(
-      token: token,
-      owner: _selectedRepo!.owner,
-      repo: _selectedRepo!.name,
-      workflowId: _selectedWorkflow!.fileName,
-      runId: appState.buildRunId ?? 0,  // 允许为 0，后台服务会自己轮询获取
-      startTime: appState.buildStartTime ?? DateTime.now(),
-    );
-    
-    // 使用类型匹配检查启动结果
-    if (result is ServiceRequestFailure) {
-      debugPrint('后台服务启动失败: ${result.error}');
+    if (appState.isDownloading) {
+      title = '📥 正在下载 APK';
+      text = '下载进行中...';
+    } else if (appState.buildStatus == 'in_progress') {
+      title = '🔨 正在构建';
+      text = _elapsedTime.isNotEmpty ? '已用时: $_elapsedTime' : '构建进行中...';
     } else {
-      debugPrint('后台服务启动成功');
+      title = '⏳ 等待构建';
+      text = '排队中...';
     }
-  }
-
-
-  /// 停止后台服务
-
-
-  Future<void> _stopBackgroundService() async {
-    await _bgService.stopBackgroundMonitor();
-  }
-
-  /// 检查后台任务结果
-  Future<void> _checkBackgroundResult() async {
-    final prefs = await SharedPreferences.getInstance();
-    final completed = prefs.getBool('bg_build_completed') ?? false;
     
-    if (completed) {
-      final apkPath = prefs.getString('bg_build_apk_path');
-      final appState = context.read<AppState>();
-      
-      if (apkPath != null) {
-        appState.updateDownloadState(
-          isDownloading: false,
-          progress: 1.0,
-          apkPath: apkPath,
-        );
-        appState.updateBuildState(
-          status: 'completed',
-          conclusion: 'success',
-        );
-      }
-      
-      // 清理标记
-      await prefs.remove('bg_build_completed');
-      await prefs.remove('bg_build_apk_path');
+    await _bgService.startService(title: title, text: text);
+  }
+
+  /// 停止前台服务
+  Future<void> _stopForegroundService() async {
+    await _bgService.stopService();
+  }
+
+  /// 更新通知内容（在后台时调用）
+  Future<void> _updateNotification(String title, String text) async {
+    if (_isInBackground) {
+      await _bgService.updateNotification(title: title, text: text);
     }
   }
 
@@ -278,9 +195,6 @@ class _BuildScreenState extends State<BuildScreen> with WidgetsBindingObserver {
   Future<void> _initBuildState() async {
     final appState = context.read<AppState>();
     
-    // 先检查后台任务结果
-    await _checkBackgroundResult();
-    
     if (appState.hasBuildInProgress || appState.isBuildSuccess) {
       if (appState.buildStartTime != null) {
         _startTicking();
@@ -346,6 +260,8 @@ class _BuildScreenState extends State<BuildScreen> with WidgetsBindingObserver {
         setState(() {
           _elapsedTime = _formatDuration(safeElapsed);
         });
+        // 更新通知栏
+        _updateNotification('🔨 正在构建', '已用时: $_elapsedTime');
       }
     }
   }
@@ -430,60 +346,7 @@ class _BuildScreenState extends State<BuildScreen> with WidgetsBindingObserver {
   void _stopPolling() {
     _pollTimer?.cancel();
     _pollTimer = null;
-  }/// 取消构建（同时取消 GitHub Actions 上的运行）
-  Future<void> _cancelBuild() async {
-    final appState = context.read<AppState>();
-    final github = context.read<GitHubService>();
-    
-    // 先停止本地轮询和后台服务
-    _stopPolling();
-    _stopTicking();
-    _stopBackgroundService();
-    
-    // 如果有正在运行的构建，尝试取消 GitHub Actions
-    if (appState.buildRunId != null && _selectedRepo != null) {
-      // 显示取消中的提示
-      setState(() {
-        _errorMessage = null;
-      });
-      
-      final result = await github.cancelWorkflowRun(
-        owner: _selectedRepo!.owner,
-        repo: _selectedRepo!.name,
-        runId: appState.buildRunId!,
-      );
-      
-      if (!result.success && result.error != null && !result.error!.contains('已完成')) {
-        // 只有在非"已完成"的错误时才显示
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('取消构建: ${result.error}'),
-              duration: const Duration(seconds: 2),
-            ),
-          );
-        }
-      } else if (result.success) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('✅ 已取消 GitHub Actions 构建'),
-              duration: Duration(seconds: 2),
-              backgroundColor: Colors.green,
-            ),
-          );
-        }
-      }
-    }
-    
-    // 清理状态
-    appState.clearBuildState();
-    setState(() {
-      _elapsedTime = '';
-    });
   }
-
-
 
   Future<void> _checkBuildStatus() async {
     final github = context.read<GitHubService>();
@@ -522,20 +385,14 @@ class _BuildScreenState extends State<BuildScreen> with WidgetsBindingObserver {
         _stopTicking();
         
         if (result.run!.isSuccess) {
-          // 检查是否已经下载过（后台下载完成的情况）
-          if (appState.downloadedApkPath != null) {
-            // 已有 APK，直接打开安装
-            await OpenFilex.open(appState.downloadedApkPath!);
-          } else {
-            _autoDownloadAndInstall();
-          }
+          await _autoDownloadAndInstall();
         } else {
+          await _updateNotification('❌ 构建失败', result.run!.conclusion ?? '');
           setState(() {
             _errorMessage = '构建失败: ${result.run!.conclusion}';
           });
         }
       }
-
     } else if (result.error != null) {
       setState(() => _errorMessage = result.error);
     }
@@ -553,9 +410,9 @@ class _BuildScreenState extends State<BuildScreen> with WidgetsBindingObserver {
     if (appState.buildRunId == null || _selectedRepo == null) return;
     
     appState.updateDownloadState(isDownloading: true, progress: 0);
+    await _updateNotification('📥 正在下载 APK', '准备下载...');
 
     final github = context.read<GitHubService>();
-
 
     // 1. 获取 artifacts
     final artifactsResult = await github.getArtifacts(
@@ -566,6 +423,7 @@ class _BuildScreenState extends State<BuildScreen> with WidgetsBindingObserver {
 
     if (artifactsResult.error != null || artifactsResult.artifacts.isEmpty) {
       appState.updateDownloadState(isDownloading: false);
+      await _updateNotification('❌ 下载失败', artifactsResult.error ?? '没有找到构建产物');
       setState(() {
         _errorMessage = artifactsResult.error ?? '没有找到构建产物';
       });
@@ -575,8 +433,9 @@ class _BuildScreenState extends State<BuildScreen> with WidgetsBindingObserver {
     final artifact = artifactsResult.artifacts.first;
 
     appState.updateDownloadState(progress: 0.2);
+    await _updateNotification('📥 正在下载 APK', '20%');
 
-    // 2. 使用流式下载（避免大文件内存问题）
+    // 2. 使用流式下载
     try {
       final tempDir = await getTemporaryDirectory();
       final zipPath = '${tempDir.path}/artifact_${DateTime.now().millisecondsSinceEpoch}.zip';
@@ -590,6 +449,7 @@ class _BuildScreenState extends State<BuildScreen> with WidgetsBindingObserver {
 
       if (downloadResult.error != null || downloadResult.filePath == null) {
         appState.updateDownloadState(isDownloading: false);
+        await _updateNotification('❌ 下载失败', downloadResult.error ?? '下载失败');
         setState(() {
           _errorMessage = downloadResult.error ?? '下载失败';
         });
@@ -597,6 +457,7 @@ class _BuildScreenState extends State<BuildScreen> with WidgetsBindingObserver {
       }
 
       appState.updateDownloadState(progress: 0.7);
+      await _updateNotification('📦 正在解压', '70%');
 
       // 3. 解压 ZIP
       final zipFile = File(downloadResult.filePath!);
@@ -618,6 +479,7 @@ class _BuildScreenState extends State<BuildScreen> with WidgetsBindingObserver {
 
       if (apkPath == null) {
         appState.updateDownloadState(isDownloading: false);
+        await _updateNotification('❌ 解压失败', '未找到 APK 文件');
         setState(() {
           _errorMessage = '未找到 APK 文件';
         });
@@ -630,11 +492,14 @@ class _BuildScreenState extends State<BuildScreen> with WidgetsBindingObserver {
         apkPath: apkPath,
       );
 
+      await _updateNotification('✅ 下载完成', '点击安装');
+
       // 4. 自动打开安装程序
       await OpenFilex.open(apkPath);
       
     } catch (e) {
       appState.updateDownloadState(isDownloading: false);
+      await _updateNotification('❌ 处理失败', e.toString());
       setState(() {
         _errorMessage = '处理失败: $e';
       });
@@ -642,7 +507,6 @@ class _BuildScreenState extends State<BuildScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _installApk() async {
-
     final appState = context.read<AppState>();
     final apkPath = appState.downloadedApkPath;
     
@@ -900,10 +764,17 @@ class _BuildScreenState extends State<BuildScreen> with WidgetsBindingObserver {
                           ),
                           if (hasActiveTask)
                             TextButton(
-                              onPressed: _cancelBuild,
+                              onPressed: () {
+                                _stopPolling();
+                                _stopTicking();
+                                _stopForegroundService();
+                                context.read<AppState>().clearBuildState();
+                                setState(() {
+                                  _elapsedTime = '';
+                                });
+                              },
                               child: const Text('取消'),
                             ),
-
                         ],
                       ),
                       if (_errorMessage != null) ...[
@@ -994,8 +865,8 @@ class _BuildScreenState extends State<BuildScreen> with WidgetsBindingObserver {
                     const Text('2. 首次构建可能需要 8-10 分钟'),
                     const Text('3. 计时与 GitHub 官网同步'),
                     const Text('4. 构建完成后会自动下载并弹出安装'),
-                    const Text('5. 🆕 退出应用后会在后台继续运行'),
-                    const Text('6. 🆕 下拉通知栏可查看构建进度'),
+                    const Text('5. 退出应用后会在后台继续运行'),
+                    const Text('6. 下拉通知栏可查看构建进度'),
                   ],
                 ),
               ),
