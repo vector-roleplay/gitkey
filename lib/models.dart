@@ -57,7 +57,6 @@ enum OperationType {
   syncFrom,  // 从其他仓库同步文件
 }
 
-
 /// 解析出的指令
 class Instruction {
   final String filePath;
@@ -92,7 +91,8 @@ class Instruction {
     this.detectedTargetRepo,
   });
 
-
+  String get typeDescription {
+    return switch (type) {
       OperationType.create => '创建文件',
       OperationType.replace => '替换文件',
       OperationType.deleteFile => '删除文件',
@@ -100,7 +100,15 @@ class Instruction {
       OperationType.insertBefore => '在锚点前插入',
       OperationType.insertAfter => '在锚点后插入',
       OperationType.deleteContent => '删除代码段',
+      OperationType.syncFrom => '从仓库同步',
     };
+  }
+  
+  /// 获取源仓库的完整描述
+  String get sourceDescription {
+    if (sourceOwner == null || sourceRepo == null) return '';
+    final branch = sourceBranch?.isNotEmpty == true ? sourceBranch : 'main';
+    return '$sourceOwner/$sourceRepo:$branch:$sourcePath';
   }
 }
 
@@ -125,6 +133,9 @@ class FileChange {
   final List<Instruction>? instructions;
   final int totalModifications;
   final int successfulModifications;
+  
+  // 从路径中检测到的目标仓库名
+  final String? detectedTargetRepo;
 
   FileChange({
     required this.filePath,
@@ -138,6 +149,7 @@ class FileChange {
     this.instructions,
     this.totalModifications = 1,
     this.successfulModifications = 1,
+    this.detectedTargetRepo,
   });
 
   FileChange copyWith({
@@ -152,6 +164,7 @@ class FileChange {
     List<Instruction>? instructions,
     int? totalModifications,
     int? successfulModifications,
+    String? detectedTargetRepo,
   }) {
     return FileChange(
       filePath: filePath ?? this.filePath,
@@ -165,6 +178,7 @@ class FileChange {
       instructions: instructions ?? this.instructions,
       totalModifications: totalModifications ?? this.totalModifications,
       successfulModifications: successfulModifications ?? this.successfulModifications,
+      detectedTargetRepo: detectedTargetRepo ?? this.detectedTargetRepo,
     );
   }
 }
@@ -251,7 +265,9 @@ class FileChangeRecord {
     originalContent: json['originalContent'] as String?,
     modifiedContent: json['modifiedContent'] as String?,
   );
-}/// 本地工作区文件
+}
+
+/// 本地工作区文件
 class WorkspaceFile {
   final String path;
   final String content;
