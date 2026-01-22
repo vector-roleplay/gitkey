@@ -13,6 +13,18 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+
+  /// 从文件路径中移除仓库名前缀（如果与目标仓库一致）
+  String _getActualPath(String filePath, String? detectedRepo, String? targetRepoName) {
+    if (detectedRepo != null && 
+        targetRepoName != null &&
+        detectedRepo.toLowerCase() == targetRepoName.toLowerCase() &&
+        filePath.toLowerCase().startsWith('${detectedRepo.toLowerCase()}/')) {
+      return filePath.substring(detectedRepo.length + 1);
+    }
+    return filePath;
+  }
+
   List<Repository> _repos = [];
   bool _isPushing = false;
   
@@ -259,16 +271,18 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
   }
-
   Future<bool> _pushSingleFile(GitHubService github, Repository repo, FileChange change) async {
+    // 计算实际路径（去掉仓库名前缀）
+    final actualPath = _getActualPath(change.filePath, change.detectedTargetRepo, repo.name);
+    
     if (change.operationType == OperationType.deleteFile) {
       if (change.sha == null) return false;
       final result = await github.deleteFile(
         owner: repo.owner,
         repo: repo.name,
-        path: change.filePath,
+        path: actualPath,
         sha: change.sha!,
-        message: 'Delete ${change.filePath} via AI Code Sync',
+        message: 'Delete $actualPath via AI Code Sync',
         branch: repo.branch,
       );
       return result.success;
@@ -276,16 +290,15 @@ class _HomeScreenState extends State<HomeScreen> {
       final result = await github.createOrUpdateFile(
         owner: repo.owner,
         repo: repo.name,
-        path: change.filePath,
+        path: actualPath,
         content: change.modifiedContent ?? '',
-        message: '${change.operationType == OperationType.create ? "Create" : "Update"} ${change.filePath} via AI Code Sync',
+        message: '${change.operationType == OperationType.create ? "Create" : "Update"} $actualPath via AI Code Sync',
         sha: change.sha,
         branch: repo.branch,
       );
       return result.success;
     }
   }
-
   /// 推送到本地工作区
   Future<void> _pushToWorkspace(List<FileChange> changes, StorageService storage, AppState appState) async {
     setState(() => _isPushing = true);
@@ -293,14 +306,19 @@ class _HomeScreenState extends State<HomeScreen> {
     int successCount = 0;
     
     for (final change in changes) {
+      // 工作区不需要去掉前缀，保持原路径
+      // 但如果需要一致性，也可以用 _getActualPath
+      final actualPath = change.filePath;
+      
       if (change.operationType == OperationType.deleteFile) {
-        await storage.removeWorkspaceFile(change.filePath);
+        await storage.removeWorkspaceFile(actualPath);
       } else {
         await storage.addOrUpdateWorkspaceFile(WorkspaceFile(
-          path: change.filePath,
+          path: actualPath,
           content: change.modifiedContent ?? '',
         ));
       }
+
       successCount++;
       appState.updateFileChange(
         change.filePath,
