@@ -54,7 +54,9 @@ enum OperationType {
   insertBefore,
   insertAfter,
   deleteContent,
+  syncFrom,  // 从其他仓库同步文件
 }
+
 
 /// 解析出的指令
 class Instruction {
@@ -65,6 +67,15 @@ class Instruction {
   final String? anchorEnd;
   final String? anchor;
   final String? replaceWith;
+  
+  // 跨仓库同步相关
+  final String? sourceOwner;
+  final String? sourceRepo;
+  final String? sourceBranch;
+  final String? sourcePath;
+  
+  // 从路径中解析出的目标仓库名（可能为空）
+  final String? detectedTargetRepo;
 
   Instruction({
     required this.filePath,
@@ -74,10 +85,14 @@ class Instruction {
     this.anchorEnd,
     this.anchor,
     this.replaceWith,
+    this.sourceOwner,
+    this.sourceRepo,
+    this.sourceBranch,
+    this.sourcePath,
+    this.detectedTargetRepo,
   });
 
-  String get typeDescription {
-    return switch (type) {
+
       OperationType.create => '创建文件',
       OperationType.replace => '替换文件',
       OperationType.deleteFile => '删除文件',
