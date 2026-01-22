@@ -16,6 +16,18 @@ class ParserScreen extends StatefulWidget {
 }
 
 class _ParserScreenState extends State<ParserScreen> {
+
+  /// 从文件路径中移除仓库名前缀（如果与目标仓库一致）
+  String _getActualPath(String filePath, String? detectedRepo, String? targetRepoName) {
+    if (detectedRepo != null && 
+        targetRepoName != null &&
+        detectedRepo.toLowerCase() == targetRepoName.toLowerCase() &&
+        filePath.toLowerCase().startsWith('${detectedRepo.toLowerCase()}/')) {
+      return filePath.substring(detectedRepo.length + 1);
+    }
+    return filePath;
+  }
+
   // 分段数据
   List<_TextSegment> _segments = [];
   
@@ -258,13 +270,15 @@ class _ParserScreenState extends State<ParserScreen> {
     }
 
     final fileChanges = <FileChange>[];
-
     for (final entry in byFile.entries) {
       final filePath = entry.key;
       final instructions = entry.value;
       
       // 获取检测到的目标仓库名
       final detectedTargetRepo = instructions.first.detectedTargetRepo;
+      
+      // 计算实际的文件路径（去掉仓库名前缀）
+      final actualPath = _getActualPath(filePath, detectedTargetRepo, repo?.name);
 
       // 检查是否是 syncFrom 操作
       final isSyncFrom = instructions.any((i) => i.type == OperationType.syncFrom);
@@ -283,8 +297,9 @@ class _ParserScreenState extends State<ParserScreen> {
         
         // 从源仓库下载内容
         if (useWorkspace && syncInst.sourceRepo == null) {
-          // 如果没有指定源仓库，从本地工作区读取
-          final workspaceFile = storage.getWorkspaceFile(syncInst.sourcePath ?? filePath);
+          // 如果没有指定源仓库，从本地工作区读取（用实际路径）
+          final workspaceFile = storage.getWorkspaceFile(syncInst.sourcePath ?? actualPath);
+
           if (workspaceFile != null) {
             modifiedContent = workspaceFile.content;
           } else {
@@ -325,10 +340,10 @@ class _ParserScreenState extends State<ParserScreen> {
         ));
         continue;
       }
-
       if (needsDownload) {
         if (useWorkspace) {
-          final workspaceFile = storage.getWorkspaceFile(filePath);
+          // 工作区也用实际路径
+          final workspaceFile = storage.getWorkspaceFile(actualPath);
           if (workspaceFile != null) {
             originalContent = workspaceFile.content;
           } else {
@@ -337,12 +352,14 @@ class _ParserScreenState extends State<ParserScreen> {
             }
           }
         } else {
+          // 用实际路径获取 GitHub 文件
           final result = await github.getFileContent(
             owner: repo!.owner,
             repo: repo.name,
-            path: filePath,
+            path: actualPath,
             branch: repo.branch,
           );
+
           if (result.success && !result.notFound) {
             originalContent = result.content;
             sha = result.sha;
