@@ -14,11 +14,12 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   List<Repository> _repos = [];
-  bool _isPushing = false;// 顶部提示消息
+  bool _isPushing = false;
+  
+  // 顶部提示消息
   String? _topMessage;
   bool _topMessageSuccess = true;
 
-  
   @override
   void initState() {
     super.initState();
@@ -35,7 +36,9 @@ class _HomeScreenState extends State<HomeScreen> {
     if (appState.selectedRepo == null && _repos.isNotEmpty) {
       appState.setSelectedRepo(storage.getDefaultRepository());
     }
-  }/// 显示顶部提示消息
+  }
+
+  /// 显示顶部提示消息
   void _showTopMessage(String message, {bool isSuccess = true}) {
     setState(() {
       _topMessage = message;
@@ -59,122 +62,7 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  
-  Future<void> _pushChanges() async {
-    final appState = context.read<AppState>();
-    final github = context.read<GitHubService>();
-    final storage = context.read<StorageService>();
-    
-    final changes = appState.getSelectedChanges();
-    if (changes.isEmpty) return;
-    
-    // 如果目标是本地工作区
-    if (appState.targetIsWorkspace) {
-      await _pushToWorkspace(changes, storage, appState);
-      return;
-    }
-    
-    final repo = appState.selectedRepo;
-    if (repo == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请先选择仓库')),
-      );
-      return;
-    }
-
-    // 检查目标仓库是否一致
-    final mismatchedFiles = _checkTargetMismatch(changes, repo);
-    if (mismatchedFiles.isNotEmpty) {
-      final confirmed = await _showMismatchWarning(mismatchedFiles, repo);
-      if (!confirmed) return;
-    }
-    
-    setState(() => _isPushing = true);
-    
-    int successCount = 0;
-    int failCount = 0;
-
-    
-    for (final change in changes) {
-      final result = await _pushSingleFile(github, repo, change);
-      
-      if (result) {
-        successCount++;
-        appState.updateFileChange(
-          change.filePath,
-          change.copyWith(status: FileChangeStatus.success),
-        );
-      } else {
-        failCount++;
-        appState.updateFileChange(
-          change.filePath,
-          change.copyWith(status: FileChangeStatus.failed),
-        );
-      }
-    }
-    
-    // 移除成功的
-    final successPaths = appState.fileChanges
-        .where((c) => c.status == FileChangeStatus.success)
-        .map((c) => c.filePath)
-        .toList();
-    for (final path in successPaths) {
-      appState.removeFileChange(path);
-    }
-    
-    // 保存历史
-    await storage.addHistory(OperationHistory(
-      id: DateTime.now().millisecondsSinceEpoch.toString(),
-      timestamp: DateTime.now(),
-      repositoryName: repo.fullName,
-      changes: changes.map((c) => FileChangeRecord(
-        filePath: c.filePath,
-        operationType: c.operationType,
-        originalContent: c.originalContent,
-        modifiedContent: c.modifiedContent,
-      )).toList(),
-      isSuccessful: failCount == 0,
-    ));
-    
-    setState(() => _isPushing = false);
-    
-    // 显示顶部提示
-    if (mounted) {
-      _showTopMessage(
-        '推送完成: $successCount 成功, $failCount 失败',
-        isSuccess: failCount == 0,
-      );
-    }
-
-  }
-
-  
-  Future<bool> _pushSingleFile(GitHubService github, Repository repo, FileChange change) async {
-    if (change.operationType == OperationType.deleteFile) {
-      if (change.sha == null) return false;
-      final result = await github.deleteFile(
-        owner: repo.owner,
-        repo: repo.name,
-        path: change.filePath,
-        sha: change.sha!,
-        message: 'Delete ${change.filePath} via AI Code Sync',
-        branch: repo.branch,
-      );
-      return result.success;
-    } else {
-      final result = await github.createOrUpdateFile(
-        owner: repo.owner,
-        repo: repo.name,
-        path: change.filePath,
-        content: change.modifiedContent ?? '',
-        message: '${change.operationType == OperationType.create ? "Create" : "Update"} ${change.filePath} via AI Code Sync',
-        sha: change.sha,
-        branch: repo.branch,
-      );
-      return result.success;
-    }
-  }/// 推送到本地工作区
-  Future<void> _pushToWorkspace(List<FileChange> changes, StorageService storage, AppState appState) async {/// 检查文件的目标仓库是否与用户选择的推送目标一致
+  /// 检查文件的目标仓库是否与用户选择的推送目标一致
   List<FileChange> _checkTargetMismatch(List<FileChange> changes, Repository repo) {
     final mismatched = <FileChange>[];
     for (final change in changes) {
@@ -286,7 +174,120 @@ class _HomeScreenState extends State<HomeScreen> {
     ) ?? false;
   }
 
+  Future<void> _pushChanges() async {
+    final appState = context.read<AppState>();
+    final github = context.read<GitHubService>();
+    final storage = context.read<StorageService>();
+    
+    final changes = appState.getSelectedChanges();
+    if (changes.isEmpty) return;
+    
+    // 如果目标是本地工作区
+    if (appState.targetIsWorkspace) {
+      await _pushToWorkspace(changes, storage, appState);
+      return;
+    }
+    
+    final repo = appState.selectedRepo;
+    if (repo == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请先选择仓库')),
+      );
+      return;
+    }
 
+    // 检查目标仓库是否一致
+    final mismatchedFiles = _checkTargetMismatch(changes, repo);
+    if (mismatchedFiles.isNotEmpty) {
+      final confirmed = await _showMismatchWarning(mismatchedFiles, repo);
+      if (!confirmed) return;
+    }
+    
+    setState(() => _isPushing = true);
+    
+    int successCount = 0;
+    int failCount = 0;
+    
+    for (final change in changes) {
+      final result = await _pushSingleFile(github, repo, change);
+      
+      if (result) {
+        successCount++;
+        appState.updateFileChange(
+          change.filePath,
+          change.copyWith(status: FileChangeStatus.success),
+        );
+      } else {
+        failCount++;
+        appState.updateFileChange(
+          change.filePath,
+          change.copyWith(status: FileChangeStatus.failed),
+        );
+      }
+    }
+    
+    // 移除成功的
+    final successPaths = appState.fileChanges
+        .where((c) => c.status == FileChangeStatus.success)
+        .map((c) => c.filePath)
+        .toList();
+    for (final path in successPaths) {
+      appState.removeFileChange(path);
+    }
+    
+    // 保存历史
+    await storage.addHistory(OperationHistory(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      timestamp: DateTime.now(),
+      repositoryName: repo.fullName,
+      changes: changes.map((c) => FileChangeRecord(
+        filePath: c.filePath,
+        operationType: c.operationType,
+        originalContent: c.originalContent,
+        modifiedContent: c.modifiedContent,
+      )).toList(),
+      isSuccessful: failCount == 0,
+    ));
+    
+    setState(() => _isPushing = false);
+    
+    // 显示顶部提示
+    if (mounted) {
+      _showTopMessage(
+        '推送完成: $successCount 成功, $failCount 失败',
+        isSuccess: failCount == 0,
+      );
+    }
+  }
+
+  Future<bool> _pushSingleFile(GitHubService github, Repository repo, FileChange change) async {
+    if (change.operationType == OperationType.deleteFile) {
+      if (change.sha == null) return false;
+      final result = await github.deleteFile(
+        owner: repo.owner,
+        repo: repo.name,
+        path: change.filePath,
+        sha: change.sha!,
+        message: 'Delete ${change.filePath} via AI Code Sync',
+        branch: repo.branch,
+      );
+      return result.success;
+    } else {
+      final result = await github.createOrUpdateFile(
+        owner: repo.owner,
+        repo: repo.name,
+        path: change.filePath,
+        content: change.modifiedContent ?? '',
+        message: '${change.operationType == OperationType.create ? "Create" : "Update"} ${change.filePath} via AI Code Sync',
+        sha: change.sha,
+        branch: repo.branch,
+      );
+      return result.success;
+    }
+  }
+
+  /// 推送到本地工作区
+  Future<void> _pushToWorkspace(List<FileChange> changes, StorageService storage, AppState appState) async {
     setState(() => _isPushing = true);
     
     int successCount = 0;
@@ -324,8 +325,6 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-
-
   @override
   Widget build(BuildContext context) {
     final appState = context.watch<AppState>();
@@ -344,7 +343,6 @@ class _HomeScreenState extends State<HomeScreen> {
               }
             },
           ),
-
           IconButton(
             icon: const Icon(Icons.settings),
             onPressed: () async {
@@ -404,7 +402,6 @@ class _HomeScreenState extends State<HomeScreen> {
           
           // 推送目标选择
           Padding(
-
             padding: const EdgeInsets.all(16),
             child: DropdownButtonFormField<String>(
               decoration: const InputDecoration(
@@ -450,7 +447,6 @@ class _HomeScreenState extends State<HomeScreen> {
               hint: const Text('请选择推送目标'),
             ),
           ),
-
           
           // 内容区域
           Expanded(
@@ -563,7 +559,6 @@ class _HomeScreenState extends State<HomeScreen> {
     };
     
     return Container(
-
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(
         color: color.withOpacity(0.1),
