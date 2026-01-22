@@ -82,11 +82,18 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
+    // 检查目标仓库是否一致
+    final mismatchedFiles = _checkTargetMismatch(changes, repo);
+    if (mismatchedFiles.isNotEmpty) {
+      final confirmed = await _showMismatchWarning(mismatchedFiles, repo);
+      if (!confirmed) return;
+    }
     
     setState(() => _isPushing = true);
     
     int successCount = 0;
     int failCount = 0;
+
     
     for (final change in changes) {
       final result = await _pushSingleFile(github, repo, change);
@@ -167,7 +174,119 @@ class _HomeScreenState extends State<HomeScreen> {
       return result.success;
     }
   }/// 推送到本地工作区
-  Future<void> _pushToWorkspace(List<FileChange> changes, StorageService storage, AppState appState) async {
+  Future<void> _pushToWorkspace(List<FileChange> changes, StorageService storage, AppState appState) async {/// 检查文件的目标仓库是否与用户选择的推送目标一致
+  List<FileChange> _checkTargetMismatch(List<FileChange> changes, Repository repo) {
+    final mismatched = <FileChange>[];
+    for (final change in changes) {
+      final detectedRepo = change.detectedTargetRepo;
+      // 如果检测到了仓库名，且与当前目标仓库名不一致
+      if (detectedRepo != null && 
+          detectedRepo.toLowerCase() != repo.name.toLowerCase()) {
+        mismatched.add(change);
+      }
+    }
+    return mismatched;
+  }
+
+  /// 显示目标不一致警告对话框
+  Future<bool> _showMismatchWarning(List<FileChange> mismatchedFiles, Repository repo) async {
+    return await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.orange[700]),
+            const SizedBox(width: 8),
+            const Text('目标仓库不一致'),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '检测到 ${mismatchedFiles.length} 个文件的路径中包含的仓库名与当前推送目标不一致：',
+                style: const TextStyle(fontWeight: FontWeight.w500),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                constraints: const BoxConstraints(maxHeight: 200),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: mismatchedFiles.length,
+                  itemBuilder: (ctx, index) {
+                    final file = mismatchedFiles[index];
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.orange,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              file.detectedTargetRepo ?? '?',
+                              style: const TextStyle(color: Colors.white, fontSize: 11),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              file.filePath,
+                              style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(height: 16),
+              RichText(
+                text: TextSpan(
+                  style: TextStyle(color: Theme.of(ctx).textTheme.bodyMedium?.color),
+                  children: [
+                    const TextSpan(text: '当前推送目标: '),
+                    TextSpan(
+                      text: repo.fullName,
+                      style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blue),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '这可能是操作失误，请确认是否继续推送？',
+                style: TextStyle(color: Colors.grey[600], fontSize: 13),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.orange),
+            child: const Text('仍然推送'),
+          ),
+        ],
+      ),
+    ) ?? false;
+  }
+
+
     setState(() => _isPushing = true);
     
     int successCount = 0;
@@ -440,9 +559,11 @@ class _HomeScreenState extends State<HomeScreen> {
       OperationType.findReplace => ('修改', Colors.orange),
       OperationType.insertBefore || OperationType.insertAfter => ('插入', Colors.purple),
       OperationType.deleteContent => ('删除段', Colors.red),
+      OperationType.syncFrom => ('同步', Colors.cyan),
     };
     
     return Container(
+
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(
         color: color.withOpacity(0.1),
