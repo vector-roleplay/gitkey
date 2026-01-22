@@ -262,12 +262,69 @@ class _ParserScreenState extends State<ParserScreen> {
     for (final entry in byFile.entries) {
       final filePath = entry.key;
       final instructions = entry.value;
+      
+      // 获取检测到的目标仓库名
+      final detectedTargetRepo = instructions.first.detectedTargetRepo;
 
+      // 检查是否是 syncFrom 操作
+      final isSyncFrom = instructions.any((i) => i.type == OperationType.syncFrom);
       final isOnlyCreate = instructions.every((i) => i.type == OperationType.create);
-      final needsDownload = !isOnlyCreate;
+      final needsDownload = !isOnlyCreate && !isSyncFrom;
 
       String? originalContent;
       String? sha;
+      String? modifiedContent;
+      bool hasError = false;
+      String? errorMsg;
+
+      // 处理 syncFrom 操作
+      if (isSyncFrom) {
+        final syncInst = instructions.firstWhere((i) => i.type == OperationType.syncFrom);
+        
+        // 从源仓库下载内容
+        if (useWorkspace && syncInst.sourceRepo == null) {
+          // 如果没有指定源仓库，从本地工作区读取
+          final workspaceFile = storage.getWorkspaceFile(syncInst.sourcePath ?? filePath);
+          if (workspaceFile != null) {
+            modifiedContent = workspaceFile.content;
+          } else {
+            hasError = true;
+            errorMsg = '本地工作区中未找到: ${syncInst.sourcePath ?? filePath}';
+          }
+        } else if (syncInst.sourceOwner != null && syncInst.sourceRepo != null) {
+          // 从远程仓库下载
+          final result = await github.getFileContent(
+            owner: syncInst.sourceOwner!,
+            repo: syncInst.sourceRepo!,
+            path: syncInst.sourcePath ?? '',
+            branch: syncInst.sourceBranch,
+          );
+          if (result.success && !result.notFound) {
+            modifiedContent = result.content;
+          } else if (result.notFound) {
+            hasError = true;
+            errorMsg = '源仓库中未找到: ${syncInst.sourceDescription}';
+          } else {
+            hasError = true;
+            errorMsg = '下载失败: ${result.error}';
+          }
+        } else {
+          hasError = true;
+          errorMsg = 'SYNC_FROM 格式错误';
+        }
+        
+        fileChanges.add(FileChange(
+          filePath: filePath,
+          operationType: OperationType.syncFrom,
+          originalContent: null,
+          modifiedContent: modifiedContent,
+          status: hasError ? FileChangeStatus.failed : FileChangeStatus.pending,
+          errorMessage: errorMsg,
+          instructions: instructions,
+          detectedTargetRepo: detectedTargetRepo,
+        ));
+        continue;
+      }
 
       if (needsDownload) {
         if (useWorkspace) {
@@ -297,9 +354,7 @@ class _ParserScreenState extends State<ParserScreen> {
         }
       }
 
-      String? modifiedContent = originalContent;
-      bool hasError = false;
-      String? errorMsg;
+      modifiedContent = originalContent;
 
       final isDeleteFile = instructions.any((i) => i.type == OperationType.deleteFile);
 
@@ -325,10 +380,11 @@ class _ParserScreenState extends State<ParserScreen> {
         errorMessage: errorMsg,
         sha: sha,
         instructions: instructions,
+        detectedTargetRepo: detectedTargetRepo,
       ));
     }
 
-    appState.addFileChanges(fileChanges);
+
 
     setState(() => _isProcessing = false);
 
