@@ -384,7 +384,7 @@ class _ParserScreenState extends State<ParserScreen> {
       ));
     }
 
-
+    appState.addFileChanges(fileChanges);
 
     setState(() => _isProcessing = false);
 
@@ -442,7 +442,6 @@ class _ParserScreenState extends State<ParserScreen> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.5),
-
               child: Row(
                 children: [
                   Container(
@@ -792,6 +791,7 @@ class _ParserScreenState extends State<ParserScreen> {
       OperationType.findReplace => (Icons.find_replace, Colors.orange),
       OperationType.insertBefore || OperationType.insertAfter => (Icons.playlist_add, Colors.purple),
       OperationType.deleteContent => (Icons.remove_circle, Colors.red),
+      OperationType.syncFrom => (Icons.sync, Colors.cyan),
     };
 
     return Icon(icon, color: color, size: 24);
