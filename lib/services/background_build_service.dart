@@ -99,3 +99,5 @@ class _EmptyTaskHandler extends TaskHandler {
     FlutterForegroundTask.launchApp();
   }
 }
+
+
